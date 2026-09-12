@@ -26,9 +26,10 @@ function relativeTroughSong() {
   }
   // Active material on both sides.
   add(0, 45, 0.7, 0.6, 0.68, 2, 60)
-  // Sparse but continuously sustained middle: low onset density with long notes,
-  // so there is no literal silent gap for phrase-gap detection to rely on.
-  add(45, 70, 2.5, 2.45, 0.52, 1, 72)
+  // Moonlit-like trough: onset density drops sharply, but long, bright,
+  // sustained tones keep the absolute intensity around the middle of the
+  // song's range. There is no literal silent gap to trigger phrase-gap logic.
+  add(45, 70, 2.5, 2.45, 0.8, 3, 84)
   add(70, 120, 0.65, 0.58, 0.72, 2, 62)
   return {
     name: 'Relative trough', duration: 120, notes, pedals: [], expressions: [],
