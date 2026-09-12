@@ -71,6 +71,17 @@ function smooth(values: readonly number[]): number[] {
   })
 }
 
+function mean(
+  windows: readonly AnalysisWindow[],
+  start: number,
+  endExclusive: number,
+  key: 'intensity' | 'density',
+): number {
+  const slice = windows.slice(start, endExclusive)
+  if (slice.length === 0) return 0
+  return slice.reduce((sum, w) => sum + w[key], 0) / slice.length
+}
+
 function intensityAt(windows: readonly AnalysisWindow[], time: number): number {
   if (windows.length === 0) return 0
   let best = windows[0]
@@ -303,8 +314,8 @@ export function analyzeSong(song: ParsedSong): SongAnalysis {
     }
   }
 
-  // Low-intensity runs become sparse regions even when a few isolated notes
-  // prevent a literal rest gap.
+  // Absolute low-intensity runs become sparse regions even when a few isolated
+  // notes prevent a literal rest gap.
   let sparseStart = -1
   for (let i = 0; i <= windows.length; i++) {
     const isSparse =
@@ -330,8 +341,56 @@ export function analyzeSong(song: ParsedSong): SongAnalysis {
     }
   }
 
-  // A resurface is the first confident recovery after the strongest recent
-  // sparse point: enough intensity must return and the local slope must be up.
+  // A musically sparse passage is often relative rather than silent: a
+  // nocturne can keep long upper notes ringing while attacks and texture thin
+  // dramatically. Detect sustained low-onset runs whose intensity AND density
+  // sit materially below both surrounding shoulders. This is deliberately
+  // contextual, so a generally quiet piece does not get labelled sparse merely
+  // for being quiet.
+  const minRelativeRun = Math.max(3, Math.ceil(6 / windowSec))
+  let relativeStart = -1
+  for (let i = 0; i <= windows.length; i++) {
+    const lowOnset = i < windows.length && windows[i].density <= 0.38
+    if (lowOnset && relativeStart < 0) relativeStart = i
+    if ((!lowOnset || i === windows.length) && relativeStart >= 0) {
+      const endIndex = i - 1
+      const runLength = endIndex - relativeStart + 1
+      if (runLength >= minRelativeRun) {
+        const shoulderCount = Math.max(2, Math.min(5, Math.floor(runLength / 2)))
+        const beforeStart = Math.max(0, relativeStart - shoulderCount)
+        const afterEnd = Math.min(windows.length, endIndex + 1 + shoulderCount)
+        const beforeCount = relativeStart - beforeStart
+        const afterCount = afterEnd - (endIndex + 1)
+        if (beforeCount >= 2 && afterCount >= 2) {
+          const runIntensity = mean(windows, relativeStart, endIndex + 1, 'intensity')
+          const runDensity = mean(windows, relativeStart, endIndex + 1, 'density')
+          const beforeIntensity = mean(windows, beforeStart, relativeStart, 'intensity')
+          const afterIntensity = mean(windows, endIndex + 1, afterEnd, 'intensity')
+          const beforeDensity = mean(windows, beforeStart, relativeStart, 'density')
+          const afterDensity = mean(windows, endIndex + 1, afterEnd, 'density')
+          const intensityDrop = Math.min(beforeIntensity, afterIntensity) - runIntensity
+          const densityDrop = Math.min(beforeDensity, afterDensity) - runDensity
+          if (intensityDrop >= 0.07 && densityDrop >= 0.1) {
+            const mid = Math.floor((relativeStart + endIndex) / 2)
+            events.push({
+              kind: 'sparse',
+              time: (windows[mid].time + windows[mid].endTime) * 0.5,
+              confidence: clamp01(
+                0.48 + intensityDrop * 1.4 + densityDrop * 0.7,
+              ),
+              intensity: windows[mid].intensity,
+            })
+          }
+        }
+      }
+      relativeStart = -1
+    }
+  }
+
+  // A resurface is the first confident recovery after a sparse point. Relative
+  // sparse passages need less absolute intensity rise than near-silence, but
+  // the return must still have an obvious local upswing and renewed onset
+  // density so ordinary fluctuations are not mistaken for a reprise.
   const sparseEvents = events
     .filter((e) => e.kind === 'sparse' && e.confidence >= 0.45)
     .sort((a, b) => a.time - b.time)
@@ -339,18 +398,22 @@ export function analyzeSong(song: ParsedSong): SongAnalysis {
     const startIndex = windows.findIndex((w) => w.endTime >= sparse.time)
     if (startIndex < 0) continue
     const sparseIntensity = Math.min(sparse.intensity, windows[startIndex].intensity)
+    const sparseDensity = windows[startIndex].density
+    const requiredRise = sparseIntensity > 0.32 ? 0.12 : 0.18
     for (let i = startIndex + 1; i < windows.length; i++) {
       const prev = windows[Math.max(startIndex, i - 2)].intensity
       const rise = windows[i].intensity - sparseIntensity
+      const densityRise = windows[i].density - sparseDensity
       if (
-        rise >= 0.22 &&
+        rise >= requiredRise &&
         windows[i].intensity >= 0.42 &&
-        windows[i].intensity > prev + 0.08
+        windows[i].intensity > prev + 0.06 &&
+        (densityRise >= 0.12 || rise >= 0.2)
       ) {
         events.push({
           kind: 'resurface',
           time: (windows[i].time + windows[i].endTime) * 0.5,
-          confidence: clamp01(0.55 + rise * 0.8),
+          confidence: clamp01(0.55 + rise * 0.8 + Math.max(0, densityRise) * 0.15),
           intensity: windows[i].intensity,
         })
         break
