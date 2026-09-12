@@ -7,6 +7,7 @@ import { Viewport } from './Viewport'
 import { TimelineEditor } from './TimelineEditor'
 import { ConfirmModal } from './ConfirmModal'
 import { LoadingOverlay } from './LoadingOverlay'
+import { MoonlitReveriePresetButton } from './MoonlitReveriePresetButton'
 import { useStore } from '../store'
 import { audioEngine } from '../audio/engine'
 import { midiInput } from '../audio/midiInput'
@@ -281,7 +282,8 @@ export function Layout() {
           remains a tall right column from Toolbar to bottom — the
           editor never extends under it. */}
       <div className="flex flex-1 overflow-hidden">
-        <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        <div className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
+          <MoonlitReveriePresetButton />
           <Viewport />
           <TimelineEditor />
         </div>
