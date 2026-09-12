@@ -15,6 +15,7 @@ import { loadDemoProject, openProject } from '../projects/actions'
 import { showAlert } from './confirm'
 import { Timeline } from './Timeline'
 import { ExpressionAutomationLane } from './ExpressionAutomationLane'
+import { SmartAutomationMenu } from './SmartAutomationMenu'
 import {
   ChevronUpIcon,
   CrosshairIcon,
@@ -42,11 +43,7 @@ function FollowPlayheadToggle() {
       }}
       onPointerDown={(e) => e.stopPropagation()}
       aria-pressed={follow}
-      title={
-        follow
-          ? t('follow.stop')
-          : t('follow.start')
-      }
+      title={follow ? t('follow.stop') : t('follow.start')}
       className={`flex h-6 items-center gap-1 rounded px-2 text-[10px] font-medium outline-none transition-colors ${
         follow
           ? 'bg-sky-500/25 text-sky-200 hover:bg-sky-500/35'
@@ -117,9 +114,7 @@ function EmptyState() {
       // height, but that's inherent to introducing a new track.
       style={{ height: 92 }}
     >
-      <span className="text-[11px] text-neutral-500">
-        {t('empty.prompt')}
-      </span>
+      <span className="text-[11px] text-neutral-500">{t('empty.prompt')}</span>
       <div className="flex items-center gap-2">
         <button
           type="button"
@@ -274,9 +269,7 @@ export function TimelineEditor() {
           with its chevron + label centred so the open/close
           affordance reads at a glance, especially when the section
           is collapsed and there's nothing else competing for the
-          eye. The Follow toggle floats on the right via absolute
-          positioning so it stays a separate button (clicking it
-          shouldn't accidentally collapse the section). */}
+          eye. Smart + Follow float on the right as separate controls. */}
       <div className="relative bg-neutral-900/60">
         <button
           type="button"
@@ -296,7 +289,8 @@ export function TimelineEditor() {
           <span>{t('editor.title')}</span>
         </button>
         {open && song && (
-          <div className="absolute right-3 top-1/2 -translate-y-1/2">
+          <div className="absolute right-3 top-1/2 flex -translate-y-1/2 items-center gap-1.5">
+            <SmartAutomationMenu />
             <FollowPlayheadToggle />
           </div>
         )}
