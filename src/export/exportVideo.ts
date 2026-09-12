@@ -35,21 +35,10 @@ export const VIDEO_QUALITIES: Record<
   VideoQualityId,
   { label: string; bitrateMul: number }
 > = {
-  // Numbers chosen so "High" is visibly cleaner than "Standard" without
-  // doubling file size — bitrate scales ~1.5×, perceived quality scales
-  // less than that for typical piano-viz content.
   standard: { label: 'Standard', bitrateMul: 1.0 },
   high: { label: 'High', bitrateMul: 1.5 },
 }
 
-/**
- * Base video bitrate (kbps) per resolution × fps combo. "Standard"
- * quality maps directly to these numbers; "High" applies the
- * `bitrateMul` from `VIDEO_QUALITIES`. Tuned for piano-visualization
- * content (dark backgrounds, sharp edges, occasional bright bloom);
- * a videographer-aimed app might pick higher numbers but these
- * produce clean files in the 30–200 MB range for typical song lengths.
- */
 const BASE_VIDEO_BITRATES_KBPS: Record<`${VideoResolutionId}_${VideoFps}`, number> = {
   '720p_30': 4_000,
   '720p_60': 6_000,
@@ -68,11 +57,6 @@ export function computeVideoBitrateKbps(
   return Math.round(base * VIDEO_QUALITIES[quality].bitrateMul)
 }
 
-/**
- * Default AAC-LC audio config — keep aligned with `exportAudio.ts`'s
- * 44.1 kHz so the WAV path and the MP4 audio path produce equivalent
- * quality. 192 kbps is transparent for piano material.
- */
 export const DEFAULT_AUDIO_CONFIG: AudioTrackConfig = {
   sampleRate: 44_100,
   bitrateKbps: 192,
@@ -104,6 +88,45 @@ export type Mp4ExportOptions = {
   onProgress?: (p: VideoRenderProgress) => void
 }
 
+type SavePickerWindow = Window & {
+  showSaveFilePicker?: (options?: {
+    suggestedName?: string
+    types?: Array<{
+      description?: string
+      accept: Record<string, string[]>
+    }>
+  }) => Promise<FileSystemFileHandle>
+}
+
+/**
+ * Chromium's File System Access API lets the muxer stream the MP4 directly
+ * to disk. `undefined` means the API is unavailable and the caller should
+ * use the legacy in-memory download path. `null` means the user cancelled.
+ */
+async function pickMp4OutputStream(
+  fileName: string,
+): Promise<FileSystemWritableFileStream | null | undefined> {
+  if (typeof window === 'undefined') return undefined
+  const picker = (window as SavePickerWindow).showSaveFilePicker
+  if (typeof picker !== 'function') return undefined
+
+  try {
+    const handle = await picker.call(window, {
+      suggestedName: fileName,
+      types: [
+        {
+          description: 'MP4 video',
+          accept: { 'video/mp4': ['.mp4'] },
+        },
+      ],
+    })
+    return await handle.createWritable()
+  } catch (e) {
+    if ((e as DOMException).name === 'AbortError') return null
+    throw e
+  }
+}
+
 export async function exportSongToMp4(
   song: ParsedSong,
   settings: Settings,
@@ -111,21 +134,35 @@ export async function exportSongToMp4(
 ): Promise<VideoExportResult> {
   if (!isVideoExportSupported()) return { kind: 'unsupported' }
 
-  const renderOptions: VideoRenderOptions = {
-    width: options.width,
-    height: options.height,
-    fps: options.fps,
-    videoBitrateKbps: options.videoBitrateKbps,
-    audio: options.audio,
-    userAudio: options.userAudio ?? null,
-    signal: options.signal,
-    onProgress: options.onProgress,
-  }
+  const fileName = options.fileName ?? defaultMp4FileName(song.name)
 
   try {
+    // Ask for the destination before rendering while this function is still
+    // running inside the Export button's user gesture. On Chrome/Edge this
+    // enables true streaming and avoids the giant final ArrayBuffer.
+    const outputStream = await pickMp4OutputStream(fileName)
+    if (outputStream === null) return { kind: 'cancelled' }
+
+    const renderOptions: VideoRenderOptions = {
+      width: options.width,
+      height: options.height,
+      fps: options.fps,
+      videoBitrateKbps: options.videoBitrateKbps,
+      audio: options.audio,
+      outputStream: outputStream ?? null,
+      userAudio: options.userAudio ?? null,
+      signal: options.signal,
+      onProgress: options.onProgress,
+    }
+
     const blob = await renderSongVideo(song, settings, renderOptions)
     if (options.signal?.aborted) return { kind: 'cancelled' }
-    const fileName = options.fileName ?? defaultMp4FileName(song.name)
+
+    // Direct-to-disk path is already complete once renderSongVideo returns.
+    if (outputStream) return { kind: 'ok' }
+
+    // Safari/Firefox fallback: keep the existing Blob download behavior.
+    if (!blob) throw new Error('Video export produced no output.')
     triggerDownload(blob, fileName)
     return { kind: 'ok' }
   } catch (e) {
