@@ -20,17 +20,17 @@ function relativeTroughSong() {
   const add = (start, end, step, duration, velocity, chord = 1, base = 60) => {
     for (let t = start; t < end; t += step) {
       for (let j = 0; j < chord; j++) {
-        notes.push({ id: id++, time: t, duration, midi: base + j * 4, velocity, track: 0 })
+        notes.push({ id: id++, time: t, duration, midi: base + j * 2, velocity, track: 0 })
       }
     }
   }
-  // Active material on both sides.
-  add(0, 45, 0.7, 0.6, 0.68, 2, 60)
-  // Moonlit-like trough: onset density drops sharply, but long, bright,
-  // sustained tones keep the absolute intensity around the middle of the
-  // song's range. There is no literal silent gap to trigger phrase-gap logic.
-  add(45, 70, 2.5, 2.45, 0.8, 3, 84)
-  add(70, 120, 0.65, 0.58, 0.72, 2, 62)
+  // Dense chordal material on both sides establishes a high-onset context.
+  add(0, 45, 0.5, 0.45, 0.68, 6, 55)
+  // Moonlit-like trough: attacks drop to one bright sustained note per second,
+  // but velocity/register keep absolute intensity around 0.4. The old absolute
+  // <=0.28 sparse rule therefore cannot detect it.
+  add(45, 70, 1.0, 0.95, 0.8, 1, 84)
+  add(70, 120, 0.5, 0.45, 0.72, 6, 57)
   return {
     name: 'Relative trough', duration: 120, notes, pedals: [], expressions: [],
     tracks: [{ name: 'Piano', hasNotes: true }],
