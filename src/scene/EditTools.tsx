@@ -82,6 +82,7 @@ const EMPTY_SONG: ParsedSong = {
   duration: 0,
   notes: [],
   pedals: [],
+  expressions: [],
   tracks: [],
 }
 

@@ -1102,12 +1102,6 @@ export class AudioEngine {
       songTime - this.midiOffsetSec,
     )
 
-    // CC11 is a continuous gain, independent of note velocity. Updating the
-    // sampler gain every engine tick lets held/pedalled notes crescendo and
-    // diminuendo instead of freezing dynamics at note-on.
-    if (!this.silent && this.piano) {
-      this.piano.setExpression(expressionAt(this.song.expressions, midiSongTime))
-    }
     if (!this.song) return
     let ni = 0
     while (ni < this.song.notes.length && this.song.notes[ni].time <= midiSongTime) ni++
@@ -1151,6 +1145,13 @@ export class AudioEngine {
       this.speedMap,
       songTime - this.midiOffsetSec,
     )
+
+    // CC11 is a continuous gain, independent of note velocity. Updating the
+    // sampler gain every engine tick lets held/pedalled notes crescendo and
+    // diminuendo instead of freezing dynamics at note-on.
+    if (!this.silent && this.piano) {
+      this.piano.setExpression(expressionAt(this.song.expressions, midiSongTime))
+    }
 
     // process pedal events
     while (this.pedalIdx < this.song.pedals.length && this.song.pedals[this.pedalIdx].time <= midiSongTime) {
