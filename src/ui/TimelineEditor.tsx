@@ -14,6 +14,7 @@ import { toggleRecord as toggleRecordControl } from '../audio/recordControl'
 import { loadDemoProject, openProject } from '../projects/actions'
 import { showAlert } from './confirm'
 import { Timeline } from './Timeline'
+import { ExpressionAutomationLane } from './ExpressionAutomationLane'
 import {
   ChevronUpIcon,
   CrosshairIcon,
@@ -302,7 +303,14 @@ export function TimelineEditor() {
       </div>
       {open && (
         <div className="pb-3 pl-4 pt-2">
-          {song ? <Timeline /> : <EmptyState />}
+          {song ? (
+            <div className="flex flex-col gap-1">
+              <Timeline />
+              <ExpressionAutomationLane />
+            </div>
+          ) : (
+            <EmptyState />
+          )}
         </div>
       )}
     </div>

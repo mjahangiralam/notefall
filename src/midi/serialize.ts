@@ -18,7 +18,7 @@ export type SerializeOptions = {
 /**
  * Serialise a `ParsedSong` back to a Standard MIDI File. Symmetric
  * counterpart to `parseMidi` — parse → edit → serialize round-trips
- * the data the editor cares about (notes + sustain pedal CC#64).
+ * the data the editor cares about (notes + sustain pedal CC#64 + expression CC#11).
  *
  * See `SerializeOptions.preserveTracks` for the two output modes.
  */
@@ -61,10 +61,13 @@ export function serializeMidi(
         velocity: n.velocity,
       })
     }
-    if (song.pedals.length > 0 && noteTrackIndices.length > 0) {
-      const pedalTrack = trackByIdx.get(noteTrackIndices[0])!
+    if (noteTrackIndices.length > 0) {
+      const controllerTrack = trackByIdx.get(noteTrackIndices[0])!
       for (const p of song.pedals) {
-        pedalTrack.addCC({ number: 64, time: p.time, value: p.value })
+        controllerTrack.addCC({ number: 64, time: p.time, value: p.value })
+      }
+      for (const p of song.expressions) {
+        controllerTrack.addCC({ number: 11, time: p.time, value: p.value })
       }
     }
   } else {
@@ -81,6 +84,9 @@ export function serializeMidi(
     }
     for (const p of song.pedals) {
       track.addCC({ number: 64, time: p.time, value: p.value })
+    }
+    for (const p of song.expressions) {
+      track.addCC({ number: 11, time: p.time, value: p.value })
     }
   }
   // toArray() returns Uint8Array<ArrayBufferLike>; copy into a fresh

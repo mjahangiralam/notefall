@@ -57,6 +57,10 @@ export type PianoInstrument = {
   stopAll(): void
   /** Master output gain. Linear scale: 0 = silent, 1 = unity, >1 = boost. */
   setVolume(value: number): void
+  /** Continuous MIDI CC11 expression gain. 1 = unity, 0 = silence. */
+  setExpression(value: number): void
+  /** Schedule a pre-sampled expression curve for OfflineAudioContext export. */
+  scheduleExpression(points: readonly { time: number; value: number }[]): void
   /** Linear gain on the dry (un-reverbed) signal. 1 = unity, 0 = mute. */
   setReverbDry(level: number): void
   /** Linear gain on the reverb output (post-convolver). 1 = unity, 0 = mute. */
@@ -192,6 +196,7 @@ export async function createPiano(
   // HP keeps the bass clean), and Hi Cut tames the tail's brightness AFTER
   // convolution. True Damping is baked into the IR itself (HF dies faster
   // as the tail progresses).
+  const expressionGain = context.createGain()
   const masterGain = context.createGain()
   const dryGain = context.createGain()
   const wetGain = context.createGain()
@@ -261,11 +266,15 @@ export async function createPiano(
     return node
   })
 
+  expressionGain.gain.value = 1
   masterGain.gain.value = 1
   dryGain.gain.value = 1
   wetGain.gain.value = 0.5
 
-  // Wire master → eq chain (in series) → split to dry/wet
+  // Wire expression → master → eq chain (in series) → split to dry/wet.
+  // Expression is separate from master volume so CC11 can swell notes that
+  // are already sustaining without mutating the user's mixer setting.
+  expressionGain.connect(masterGain)
   masterGain.connect(eqFilters[0])
   for (let i = 0; i < eqFilters.length - 1; i++) {
     eqFilters[i].connect(eqFilters[i + 1])
@@ -297,7 +306,7 @@ export async function createPiano(
     context as AudioContext,
     descriptor,
     {
-      destination: masterGain,
+      destination: expressionGain,
       storage: createSampleStorage(),
       velocity: 100,
       scheduler: options?.scheduler,
@@ -341,6 +350,32 @@ export async function createPiano(
       const now = context.currentTime
       masterGain.gain.cancelScheduledValues(now)
       masterGain.gain.setTargetAtTime(target, now, 0.01)
+    },
+    setExpression(value) {
+      const v = Math.max(0, Math.min(1, value))
+      const now = context.currentTime
+      expressionGain.gain.cancelScheduledValues(now)
+      expressionGain.gain.setTargetAtTime(v, now, 0.01)
+    },
+    scheduleExpression(points) {
+      const param = expressionGain.gain
+      param.cancelScheduledValues(0)
+      if (points.length === 0) {
+        param.setValueAtTime(1, 0)
+        return
+      }
+      let lastTime = -Infinity
+      for (let i = 0; i < points.length; i++) {
+        const p = points[i]
+        const time = Math.max(0, p.time)
+        const value = Math.max(0, Math.min(1, p.value))
+        if (i === 0 || time <= lastTime + 1e-9) {
+          param.setValueAtTime(value, time)
+        } else {
+          param.linearRampToValueAtTime(value, time)
+        }
+        lastTime = time
+      }
     },
     setReverbDry(level) {
       const v = Math.max(0, level)
@@ -431,6 +466,7 @@ export async function createPiano(
       } catch {
         /* ignore */
       }
+      safeDisconnect(expressionGain)
       safeDisconnect(masterGain)
       for (const eq of eqFilters) safeDisconnect(eq)
       safeDisconnect(dryGain)

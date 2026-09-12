@@ -613,6 +613,10 @@ function hashSong(song: ParsedSong | null): string {
   for (const p of song.pedals) {
     acc += `${p.time.toFixed(6)},${p.value.toFixed(4)};`
   }
+  acc += '|expr|'
+  for (const p of song.expressions) {
+    acc += `${p.time.toFixed(6)},${p.value.toFixed(4)};`
+  }
   return acc
 }
 function hashSettings(settings: Settings): string {

@@ -1,3 +1,5 @@
+import type { ExpressionPoint } from './expressionMap'
+
 export type NoteEvent = {
   id: number
   midi: number
@@ -34,5 +36,7 @@ export type ParsedSong = {
   duration: number
   notes: NoteEvent[]
   pedals: PedalEvent[]
+  /** MIDI CC11 expression automation, in MIDI-time seconds. */
+  expressions: ExpressionPoint[]
   tracks: TrackInfo[]
 }

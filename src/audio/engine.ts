@@ -21,6 +21,7 @@ import {
   type VelocityCurve,
 } from './velocityCurve'
 import { DEFAULT_VELOCITY_COMPENSATION } from './salamanderDescriptor'
+import { expressionAt, expressionVisualScale } from '../midi/expressionMap'
 
 type ActiveNote = {
   id: number
@@ -629,6 +630,7 @@ export class AudioEngine {
     this.releaseAll()
     this.stopUserAudioSource()
     this.song = song
+    this.piano?.setExpression(expressionAt(song.expressions, 0))
     this.noteIdx = 0
     this.pedalIdx = 0
     this.pedalDown = false
@@ -672,6 +674,7 @@ export class AudioEngine {
     // the pedal flips or when the song's pedal track is muted.
     this.song = song
     this.recomputeIndices(t)
+    this.piano?.setExpression(expressionAt(song.expressions, this.currentMidiTime()))
   }
 
   /**
@@ -684,6 +687,7 @@ export class AudioEngine {
     this.releaseAll()
     this.stopUserAudioSource()
     this.song = null
+    this.piano?.setExpression(1)
     this.noteIdx = 0
     this.pedalIdx = 0
     this.pedalDown = false
@@ -771,6 +775,10 @@ export class AudioEngine {
         if (effEnd > midiClamped) newActiveIds.add(n.id)
       }
     }
+
+    this.piano?.setExpression(
+      expressionAt(this.song?.expressions ?? [], midiClamped),
+    )
 
     const ctxNow = this.piano?.context.currentTime ?? 0
     const stopAt = ctxNow + STOP_BUFFER
@@ -864,6 +872,20 @@ export class AudioEngine {
    */
   currentMidiTime(): number {
     return timelineToMidi(this.speedMap, this.currentSongTime() - this.midiOffsetSec)
+  }
+
+  /** Current MIDI CC11 value at the audible playhead. */
+  currentExpression(): number {
+    if (!this.song) return 1
+    return expressionAt(this.song.expressions, this.currentMidiTime())
+  }
+
+  /** Subtle visual multiplier; strict no-op for songs without CC11. */
+  currentExpressionVisualScale(): number {
+    return expressionVisualScale(
+      this.currentExpression(),
+      (this.song?.expressions.length ?? 0) > 0,
+    )
   }
 
   /**
@@ -1079,6 +1101,13 @@ export class AudioEngine {
       this.speedMap,
       songTime - this.midiOffsetSec,
     )
+
+    // CC11 is a continuous gain, independent of note velocity. Updating the
+    // sampler gain every engine tick lets held/pedalled notes crescendo and
+    // diminuendo instead of freezing dynamics at note-on.
+    if (!this.silent && this.piano) {
+      this.piano.setExpression(expressionAt(this.song.expressions, midiSongTime))
+    }
     if (!this.song) return
     let ni = 0
     while (ni < this.song.notes.length && this.song.notes[ni].time <= midiSongTime) ni++

@@ -1,9 +1,10 @@
 import { Scheduler } from 'smplr'
 import type { ParsedSong } from '../midi/types'
-import { buildSpeedMap, midiToTimeline } from '../midi/speedMap'
+import { buildSpeedMap, midiToTimeline, timelineToMidi } from '../midi/speedMap'
 import type { Settings } from '../store'
 import { createPiano } from '../audio/sampler'
 import { evaluateVelocityCurve } from '../audio/velocityCurve'
+import { expressionAt } from '../midi/expressionMap'
 
 /**
  * Offline render of `song` with the given `settings` into a stereo
@@ -225,6 +226,32 @@ export async function renderSongAudio(
     piano.setVelocityCompensation(settings.velocityCompensation)
     for (let i = 0; i < settings.eqBands.length; i++) {
       piano.setEqBand(i, settings.eqBands[i])
+    }
+
+    // OfflineAudioContext needs the whole CC11 curve scheduled up-front.
+    // Sample in TL_audio at 50 Hz so the exported gain follows the same
+    // MIDI-time expression curve even through non-linear speed automation.
+    if (song.expressions.length === 0) {
+      piano.scheduleExpression([{ time: 0, value: 1 }])
+    } else {
+      const expressionSchedule: Array<{ time: number; value: number }> = [
+        { time: 0, value: expressionAt(song.expressions, midiTrimStart) },
+      ]
+      const startTl = Math.max(0, midiOffset + midiToTimeline(speedMap, midiTrimStart))
+      const endTl = Math.max(startTl, midiOffset + midiToTimeline(speedMap, midiTrimEnd))
+      const step = 0.02
+      for (let t = startTl; t < endTl; t += step) {
+        const midiT = timelineToMidi(speedMap, t - midiOffset)
+        expressionSchedule.push({
+          time: t,
+          value: expressionAt(song.expressions, midiT),
+        })
+      }
+      expressionSchedule.push({
+        time: endTl,
+        value: expressionAt(song.expressions, midiTrimEnd),
+      })
+      piano.scheduleExpression(expressionSchedule)
     }
   } else {
     // Emit a synthetic "loaded" pulse so progress UI doesn't sit on

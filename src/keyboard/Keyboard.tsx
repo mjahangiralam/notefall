@@ -424,6 +424,7 @@ export function Keyboard() {
     // so every value below is bit-identical to the pre-pin code.
     const rs = getResolvedSettings();
     const brightness = rs.keyboardBrightness;
+    const dynamicsScale = audioEngine.currentExpressionVisualScale();
     const pressK = 1 - Math.exp(-delta / Math.max(0.005, PRESS_TC));
     // Track the live keyboard back edge so the black-key clip stays put
     // if keyboardY is adjusted. Normal = (0,-1,0) → kept where y <= c.
@@ -476,7 +477,8 @@ export function Keyboard() {
       }
       if (glowOn) {
         mat.emissive.set(glowColorHex);
-        mat.emissiveIntensity = e * rs.keyGlowIntensity * brightness;
+        mat.emissiveIntensity =
+          e * rs.keyGlowIntensity * brightness * dynamicsScale;
       } else {
         mat.emissiveIntensity = 0;
       }
@@ -541,7 +543,9 @@ export function Keyboard() {
     // Mapping is calibrated so each slider's *default* reproduces the
     // pre-uniform hardcoded look.
     sharedLightUniforms.uLightBoost.value =
-      LIGHT_BOOST_BASE * (rs.flashIntensity / DEFAULT_FLASH_INTENSITY);
+      LIGHT_BOOST_BASE *
+      (rs.flashIntensity / DEFAULT_FLASH_INTENSITY) *
+      dynamicsScale;
     sharedLightUniforms.uFalloffX.value =
       LIGHT_FALLOFF_X_BASE * (DEFAULT_FLASH_WIDTH / Math.max(0.01, rs.flashWidth));
     sharedLightUniforms.uFalloffY.value =
