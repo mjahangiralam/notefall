@@ -1,5 +1,9 @@
 import * as THREE from 'three'
-import { ArrayBufferTarget, Muxer } from 'mp4-muxer'
+import {
+  ArrayBufferTarget,
+  FileSystemWritableFileStreamTarget,
+  Muxer,
+} from 'mp4-muxer'
 import type { ParsedSong } from '../midi/types'
 import { buildSpeedMap, midiToTimeline } from '../midi/speedMap'
 import type { Settings } from '../store'
@@ -64,6 +68,12 @@ export type VideoRenderOptions = {
   videoBitrateKbps: number
   /** `null` to omit the audio track entirely. */
   audio: AudioTrackConfig
+  /**
+   * When provided, mp4-muxer writes chunks directly to this file stream
+   * instead of building one giant ArrayBuffer in memory. This is the
+   * preferred path for long/high-bitrate exports in Chromium browsers.
+   */
+  outputStream?: FileSystemWritableFileStream | null
   /**
    * Optional user-provided accompaniment buffer to mix alongside the
    * sampled piano. Routed through `renderSongAudio` only — the video
@@ -157,33 +167,31 @@ function yieldToEventLoop(): Promise<void> {
  * while the video frame loop steps R3F on the main thread — so total
  * wall-clock time ≈ max(audio_time, video_time) instead of the sum.
  *
- * Pipeline:
- *   1. Save R3F renderer / clock / camera / frameloop state for
- *      restoration. Disarm `THREE.Clock.autoStart` so its `getDelta()`
- *      doesn't pollute `state.clock.elapsedTime` with wall-clock
- *      seconds in the override path.
- *   2. Install a `VirtualClock` and put the audio engine into silent
- *      export mode.
- *   3. Kick off `renderSongAudio` — runs in its own
- *      `OfflineAudioContext`, doesn't touch the realtime engine.
- *   4. Configure VideoEncoder, switch R3F to `frameloop="never"`, and
- *      step `(totalDuration * fps)` frames in parallel with (3).
- *   5. After the video loop finishes, await the audio buffer (likely
- *      already done by then), encode it as AAC chunks into the same
- *      muxer.
- *   6. Flush both encoders, finalize the muxer, restore R3F state.
+ * When `outputStream` is provided, the MP4 is streamed directly to disk
+ * through mp4-muxer's FileSystemWritableFileStreamTarget. Otherwise the
+ * legacy ArrayBufferTarget path is used and a Blob is returned.
  */
 export async function renderSongVideo(
   song: ParsedSong,
   settings: Settings,
   options: VideoRenderOptions,
-): Promise<Blob> {
+): Promise<Blob | null> {
   if (!isVideoExportSupported()) {
     throw new Error(
       'Video export requires a browser with WebCodecs (Chrome / Edge / Safari 16.4+).',
     )
   }
-  const { width, height, fps, videoBitrateKbps, audio, userAudio, signal, onProgress } = options
+  const {
+    width,
+    height,
+    fps,
+    videoBitrateKbps,
+    audio,
+    outputStream,
+    userAudio,
+    signal,
+    onProgress,
+  } = options
   if (signal?.aborted) throw new VideoRenderAborted()
 
   const r3f = getR3FState()
@@ -215,20 +223,27 @@ export async function renderSongVideo(
   setActiveClock(clock)
   audioEngine.beginExportPlayback()
 
+  // For long exports, write directly to the selected file instead of
+  // accumulating the finished MP4 in one contiguous ArrayBuffer. The
+  // in-memory target remains as a fallback for browsers without FSA.
+  const memoryTarget = outputStream ? null : new ArrayBufferTarget()
   const muxer = new Muxer({
-    target: new ArrayBufferTarget(),
+    target: outputStream
+      ? new FileSystemWritableFileStreamTarget(outputStream)
+      : memoryTarget!,
     video: { codec: 'avc', width, height, frameRate: fps },
-    // Omit the audio track entirely when audio is disabled — passing
-    // `audio: undefined` produces a silent MP4 with just the video
-    // stream, which is what the "no audio" preset wants.
     ...(audio
       ? {
           audio: { codec: 'aac' as const, numberOfChannels: 2, sampleRate: audio.sampleRate },
         }
       : {}),
-    fastStart: 'in-memory',
+    // Streaming targets cannot use the in-memory fast-start mode because
+    // that mode intentionally buffers the whole file. A local exported MP4
+    // is still fully valid with the moov atom written at the end.
+    fastStart: outputStream ? false : 'in-memory',
   })
 
+  let outputStreamClosed = false
   let videoEncoderError: Error | null = null
   const videoEncoder = new VideoEncoder({
     output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
@@ -237,10 +252,7 @@ export async function renderSongVideo(
     },
   })
 
-  // The audio encoder is only constructed when an audio track is
-  // wanted. Lazy-construction lets the no-audio path skip
-  // `new AudioEncoder({...})` and `audioEncoder.close()` entirely so
-  // there's no chance of an unused encoder leaking warnings.
+  // The audio encoder is only constructed when an audio track is wanted.
   let audioEncoderError: Error | null = null
   const audioEncoder = audio
     ? new AudioEncoder({
@@ -251,12 +263,6 @@ export async function renderSongVideo(
       })
     : null
 
-  // ──────────────────────────────────────────────────────────────────
-  // Combined progress. Audio and video render concurrently when both
-  // tracks are wanted. The bar is a weighted sum of two independent
-  // fractions; in the audio-disabled case, the audio weight collapses
-  // to 0 and the bar is pure video progress.
-  // ──────────────────────────────────────────────────────────────────
   const audioWeight = audio ? AUDIO_PROGRESS_WEIGHT : 0
   const videoWeight = audio ? VIDEO_PROGRESS_WEIGHT : 1
   let audioFraction = audio ? 0 : 1
@@ -286,8 +292,7 @@ export async function renderSongVideo(
 
   try {
     // Kick off the audio render IN PARALLEL with the video pass when
-    // audio is wanted. Skipped entirely otherwise — saves ~60 MB
-    // sample fetch + offline render time.
+    // audio is wanted. Skipped entirely otherwise.
     const audioRenderPromise: Promise<AudioBuffer> | null = audio
       ? renderSongAudio(
           song,
@@ -327,24 +332,13 @@ export async function renderSongVideo(
       avc: { format: 'avc' },
     })
 
-    // Effective end-of-timeline mirrors the audio render: when the
-    // user-provided accompaniment extends past the MIDI we render
-    // additional frames so the final visual still matches the audio
-    // tail (otherwise the video would freeze on its last MIDI frame
-    // while the audio kept playing).
     const audioTrimEnd = userAudio
       ? Math.min(userAudio.buffer.duration, userAudio.trimEndSec ?? userAudio.buffer.duration)
       : 0
     const audioEnd = userAudio ? userAudio.offsetSec + audioTrimEnd : 0
     const midiTrimEnd = settings.midiTrimEndSec ?? song.duration
-    // Speed automation can stretch the MIDI past its natural length;
-    // walk the map to get the actual timeline end.
     const speedMap = buildSpeedMap(settings.midiSpeedAutomation)
     const midiTrimEndTimeline = midiToTimeline(speedMap, midiTrimEnd)
-    // Mirror renderAudio: MIDI is shifted by `settings.midiOffsetSec`
-    // on the export timeline so the rendered video extends past the
-    // delayed song end. Trim ends shrink the rendered window so we
-    // don't burn frames on a silent tail.
     const totalDuration =
       Math.max(midiTrimEndTimeline + settings.midiOffsetSec, audioEnd) + TAIL_SECONDS
     const totalFrames = Math.max(1, Math.ceil(totalDuration * fps))
@@ -357,8 +351,6 @@ export async function renderSongVideo(
 
       const t = n / fps
       clock.setTime(t)
-      // Pass SECONDS to advance — see the autoStart=false comment
-      // above. delta in useFrame becomes 1/fps in seconds.
       r3f.advance(t, true)
 
       const frame = new VideoFrame(gl.domElement, {
@@ -381,12 +373,6 @@ export async function renderSongVideo(
       videoEncoder.encode(frame, { keyFrame: n % keyframeInterval === 0 })
       frame.close()
 
-      // Yield once per frame so DOM events (Cancel click) get
-      // processed and the video encoder's output handler can run
-      // between our encode calls. MessageChannel-postMessage is
-      // ~zero-overhead; setTimeout(0) would compound to many seconds
-      // across an 18 000-frame render due to the spec's nested-
-      // timeout clamp.
       await yieldToEventLoop()
 
       videoFraction = (n + 1) / totalFrames
@@ -398,9 +384,6 @@ export async function renderSongVideo(
 
     // Audio AAC encode pass. Skipped entirely when audio is disabled.
     if (audioEncoder && audioRenderPromise && audio) {
-      // Now await the audio buffer (might already be done from the
-      // parallel render). The race makes Cancel responsive even if the
-      // audio side is still inside `startRendering()`.
       const audioBuffer = await raceWithAbort(
         audioRenderPromise.catch((e) => {
           if (e instanceof AudioRenderAborted) throw new VideoRenderAborted()
@@ -456,8 +439,16 @@ export async function renderSongVideo(
     onProgress?.({ phase: 'finalizing' })
     muxer.finalize()
 
-    const target = muxer.target as ArrayBufferTarget
-    const blob = new Blob([target.buffer], { type: 'video/mp4' })
+    if (outputStream) {
+      // mp4-muxer queues file writes internally; closing waits for them and
+      // commits the temporary File System Access file to its final path.
+      await outputStream.close()
+      outputStreamClosed = true
+      onProgress?.({ phase: 'done' })
+      return null
+    }
+
+    const blob = new Blob([memoryTarget!.buffer], { type: 'video/mp4' })
     onProgress?.({ phase: 'done' })
     return blob
   } finally {
@@ -470,6 +461,15 @@ export async function renderSongVideo(
       if (audioEncoder && audioEncoder.state !== 'closed') audioEncoder.close()
     } catch {
       /* ignore */
+    }
+    // If rendering was cancelled or failed, discard the partially-written
+    // file. A successful stream was already closed above.
+    if (outputStream && !outputStreamClosed) {
+      try {
+        await outputStream.abort()
+      } catch {
+        /* ignore */
+      }
     }
     try {
       audioEngine.endExportPlayback()
