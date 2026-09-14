@@ -6,6 +6,7 @@ import { PageLoader } from './ui/PageLoader'
 import { initAnalytics, track } from './usage'
 import { hasFileSystemAccess } from './projects/io'
 import { isVideoExportSupported } from './export/renderVideo'
+import { TrackInstrumentSync } from './audio/TrackInstrumentSync'
 
 // Below this width the full UI (viewport + inspector + transport overlay)
 // does not fit, so a fallback is shown. Matches Tailwind's `lg` breakpoint.
@@ -93,6 +94,7 @@ export function App() {
 
   return (
     <>
+      <TrackInstrumentSync />
       {body}
       <PageLoader visible={!appReady} />
     </>
