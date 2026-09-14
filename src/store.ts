@@ -699,6 +699,8 @@ const RESET_PRESERVED_KEYS = [
  * `defaultSettings[k]`.
  */
 const SONG_TIED_KEYS = [
+  // Per-track instrument choices belong to the loaded MIDI's track indices.
+  'trackInstruments',
   // Pins
   'settingsKeyframes',
   // MIDI clip position + length (trim)
