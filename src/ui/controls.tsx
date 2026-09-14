@@ -751,7 +751,7 @@ export function SelectRow<T extends string>({ label, value, options, onChange, d
           <span className="text-neutral-500">▾</span>
         </Button>
         <Popover className="rounded border border-neutral-700 bg-neutral-900 p-1 shadow-xl">
-          <ListBox className="outline-none">
+          <ListBox className="max-h-80 overflow-y-auto outline-none">
             {options.map((o) => (
               <ListBoxItem
                 key={o.value}

@@ -18,6 +18,7 @@ import { VelocityCurveEditor } from './VelocityCurveEditor'
 import { Button, FileTrigger, OverlayArrow, Tooltip, TooltipTrigger } from 'react-aria-components'
 import { useCustomTexture } from '../notes/customTexture'
 import { CAMERA_LIMITS } from '../scene/cameraLimits'
+import { instrumentPickerOptions } from '../audio/instrumentCatalog'
 
 const EQ_LABELS = ['80', '250', '800', '2.5k', '6k', '12k']
 
@@ -176,6 +177,7 @@ function TrackColorRows() {
   const { t: tr } = useTranslation('inspector')
   const song = useStore((st) => st.song)
   const trackColors = useEffectiveSetting('trackColors')
+  const trackInstruments = useEffectiveSetting('trackInstruments') ?? {}
   const noteColor = useEffectiveSetting('noteColor')
   const noteTracks =
     song?.tracks.map((t, idx) => ({ t, idx })).filter(({ t }) => t.hasNotes) ?? []
@@ -188,26 +190,52 @@ function TrackColorRows() {
         const key = String(idx)
         const hasOverride = trackColors[key] !== undefined
         const value = trackColors[key] ?? noteColor
+        const instrumentValue = trackInstruments[key] ?? 'auto'
+        const autoName = t.percussion
+          ? 'Drums'
+          : (t.instrumentName ?? 'Notefall Grand Piano')
+        const instrumentOptions = [
+          { value: 'auto', label: `Auto (${autoName})` },
+          ...instrumentPickerOptions
+            .filter((o) => o.value !== 'auto' && o.group !== 'Sound Effects')
+            .map((o) => ({
+              value: o.value,
+              label: o.value === 'notefall-grand' ? o.label : `${o.group} · ${o.label}`,
+            })),
+        ]
         return (
-          <ColorRow
-            key={idx}
-            label={t.name}
-            value={value}
-            onChange={(v) =>
-              atomicUpdate({ trackColors: { ...trackColors, [key]: v } })
-            }
-            defaultValue={noteColor}
-            isModified={hasOverride}
-            onReset={
-              hasOverride
-                ? () => {
-                    const next = { ...trackColors }
-                    delete next[key]
-                    atomicUpdate({ trackColors: next })
-                  }
-                : undefined
-            }
-          />
+          <div key={idx}>
+            <ColorRow
+              label={t.name}
+              value={value}
+              onChange={(v) =>
+                atomicUpdate({ trackColors: { ...trackColors, [key]: v } })
+              }
+              defaultValue={noteColor}
+              isModified={hasOverride}
+              onReset={
+                hasOverride
+                  ? () => {
+                      const next = { ...trackColors }
+                      delete next[key]
+                      atomicUpdate({ trackColors: next })
+                    }
+                  : undefined
+              }
+            />
+            <SelectRow
+              label={`${t.name} · Instrument`}
+              value={instrumentValue}
+              options={instrumentOptions}
+              onChange={(v) => {
+                const next = { ...trackInstruments }
+                if (v === 'auto') delete next[key]
+                else next[key] = v
+                atomicUpdate({ trackInstruments: next })
+              }}
+              defaultValue="auto"
+            />
+          </div>
         )
       })}
     </>

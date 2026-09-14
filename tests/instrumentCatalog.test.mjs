@@ -64,7 +64,7 @@ test('percussion auto-resolves to a drum-oriented fallback', async () => {
   const { resolveTrackInstrument } = await loadModule()
   assert.equal(
     resolveTrackInstrument(track({ program: 0, percussion: true, channel: 9 }), undefined),
-    'soundfont:synth_drum',
+    'drum:TR-808',
   )
 })
 

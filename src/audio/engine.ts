@@ -8,11 +8,8 @@ import {
   type SpeedMap,
   type SpeedPoint,
 } from '../midi/speedMap'
-import {
-  createPiano,
-  type PianoInstrument,
-  type LoadProgress,
-} from './sampler'
+import { type LoadProgress } from './sampler'
+import { createInstrumentRack, type InstrumentRack } from './instrumentRack'
 import { now } from './clock'
 import {
   DEFAULT_VELOCITY_CURVE,
@@ -104,7 +101,7 @@ export type LiveInputListener = (
  * also calls tick() to push due events to the sampler.
  */
 export class AudioEngine {
-  private piano: PianoInstrument | null = null
+  private piano: InstrumentRack | null = null
   private song: ParsedSong | null = null
 
   private playing = false
@@ -144,6 +141,8 @@ export class AudioEngine {
   // applies its own copy in midiInput.ts before calling triggerKey, and
   // screen-keyboard touches stay un-shifted (the user clicks visible keys).
   private transpose = 0
+  // Per-track audio overrides. Missing keys mean Auto from MIDI metadata.
+  private trackInstruments: Record<string, string> = {}
 
   private noteIdx = 0
   private pedalIdx = 0
@@ -233,7 +232,13 @@ export class AudioEngine {
     if (this.initPromise) return this.initPromise
     this.initPromise = (async () => {
       try {
-        this.piano = await createPiano(undefined, onProgress)
+        this.piano = await createInstrumentRack(undefined, {
+          eagerGrand: true,
+          onProgress,
+        })
+        if (this.song) {
+          await this.piano.prepare(this.song, this.trackInstruments, onProgress)
+        }
         this.piano.setVolume(this.effectiveSamplerVolume())
         this.piano.setReverbSize(this.reverbSize)
         this.piano.setReverbDecayTime(this.reverbDecayTime)
@@ -386,6 +391,12 @@ export class AudioEngine {
   }
   getTranspose(): number {
     return this.transpose
+  }
+
+  async setTrackInstruments(assignments: Record<string, string>): Promise<void> {
+    this.trackInstruments = { ...assignments }
+    if (!this.piano || !this.song) return
+    await this.piano.prepare(this.song, this.trackInstruments)
   }
 
   /**
@@ -630,6 +641,9 @@ export class AudioEngine {
     this.releaseAll()
     this.stopUserAudioSource()
     this.song = song
+    void this.piano?.prepare(song, this.trackInstruments).catch((error) => {
+      console.error('Could not prepare MIDI instruments', error)
+    })
     this.piano?.setExpression(expressionAt(song.expressions, 0))
     this.noteIdx = 0
     this.pedalIdx = 0
@@ -701,6 +715,7 @@ export class AudioEngine {
     if (Tone.getContext().state !== 'running') {
       await Tone.start()
     }
+    if (this.piano) await this.piano.prepare(this.song, this.trackInstruments)
     this.startedAt = now()
     this.playing = true
     this.startBackgroundTicker()
@@ -824,7 +839,7 @@ export class AudioEngine {
         const playedMidi = n.midi + this.transpose
         if (playedMidi < 0 || playedMidi > 127) continue
         const shaped = this.shapeVelocity(n.velocity)
-        const stopFn = this.piano.start(playedMidi, shaped, audioBase, `s${n.id}`)
+        const stopFn = this.piano.start(playedMidi, shaped, audioBase, `s${n.id}`, n.track)
         const endTime = Math.min(n.time + n.duration, seekTrimEnd)
         this.active.set(n.id, { id: n.id, midi: playedMidi, endTime, stop: stopFn })
         this.emit({ type: 'on', midi: playedMidi, velocity: shaped, songTime: clamped, track: n.track })
@@ -1203,7 +1218,7 @@ export class AudioEngine {
       const stopFn =
         this.silent || !this.piano
           ? noopStop
-          : this.piano.start(playedMidi, shaped, audioBase + offset, `s${n.id}`)
+          : this.piano.start(playedMidi, shaped, audioBase + offset, `s${n.id}`, n.track)
       // Clamp note-off to the trim end so a note that originally
       // extended past the tail trim gets cut at the trim boundary
       // instead of sustaining indefinitely.

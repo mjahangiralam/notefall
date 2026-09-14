@@ -2,7 +2,7 @@ import { Scheduler } from 'smplr'
 import type { ParsedSong } from '../midi/types'
 import { buildSpeedMap, midiToTimeline, timelineToMidi } from '../midi/speedMap'
 import type { Settings } from '../store'
-import { createPiano } from '../audio/sampler'
+import { createInstrumentRack } from '../audio/instrumentRack'
 import { evaluateVelocityCurve } from '../audio/velocityCurve'
 import { expressionAt } from '../midi/expressionMap'
 
@@ -188,22 +188,26 @@ export async function renderSongAudio(
   // synchronously, scheduling each AudioBufferSourceNode at the
   // correct absolute time via `source.start(time)` — sample-accurate
   // because Web Audio honours the absolute time even on offline ctx.
-  let piano: Awaited<ReturnType<typeof createPiano>> | null = null
+  let piano: Awaited<ReturnType<typeof createInstrumentRack>> | null = null
   if (renderSampler) {
     onProgress?.({ phase: 'loading', loaded: 0, total: 1 })
     // Race against the abort signal so Cancel is responsive even during
     // the ~60 MB sample fetch — without this, `await createPiano` blocks
     // for the entire load before the next signal check fires.
     piano = await raceWithAbort(
-      createPiano(
-        ctx,
-        (p) => {
+      createInstrumentRack(ctx, {
+        eagerGrand: false,
+        scheduler: new Scheduler(ctx, { lookaheadMs: Number.POSITIVE_INFINITY }),
+        onProgress: (p) => {
           onProgress?.({ phase: 'loading', loaded: p.loaded, total: p.total })
         },
-        {
-          scheduler: new Scheduler(ctx, { lookaheadMs: Number.POSITIVE_INFINITY }),
-        },
-      ),
+      }),
+      signal,
+    )
+    await raceWithAbort(
+      piano.prepare(song, settings.trackInstruments ?? {}, (p) => {
+        onProgress?.({ phase: 'loading', loaded: p.loaded, total: p.total })
+      }),
       signal,
     )
 
@@ -313,7 +317,7 @@ export async function renderSongAudio(
       const offMidi = Math.min(range ? range.end : naturalOff, midiTrimEnd)
       const actualOff = midiOffset + midiToTimeline(speedMap, offMidi)
 
-      const stopFn = piano.start(playedMidi, shaped, onTime, `s${n.id}`)
+      const stopFn = piano.start(playedMidi, shaped, onTime, `s${n.id}`, n.track)
       stopFn(actualOff + STOP_BUFFER)
     }
   }

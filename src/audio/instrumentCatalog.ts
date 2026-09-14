@@ -1,6 +1,6 @@
 import type { TrackInfo } from '../midi/types'
 
-export type InstrumentId = 'auto' | 'notefall-grand' | `soundfont:${string}`
+export type InstrumentId = 'auto' | 'notefall-grand' | 'drum:TR-808' | `soundfont:${string}`
 
 export type InstrumentOption = {
   value: InstrumentId
@@ -41,7 +41,7 @@ export const GM_PROGRAMS = [
   ['Electric Piano 1', 'electric_piano_1'],
   ['Electric Piano 2', 'electric_piano_2'],
   ['Harpsichord', 'harpsichord'],
-  ['Clavinet', 'clavichord'],
+  ['Clavinet', 'clavinet'],
   ['Celesta', 'celesta'],
   ['Glockenspiel', 'glockenspiel'],
   ['Music Box', 'music_box'],
@@ -84,11 +84,11 @@ export const GM_PROGRAMS = [
   ['Timpani', 'timpani'],
   ['String Ensemble 1', 'string_ensemble_1'],
   ['String Ensemble 2', 'string_ensemble_2'],
-  ['Synth Strings 1', 'synthstrings_1'],
-  ['Synth Strings 2', 'synthstrings_2'],
+  ['Synth Strings 1', 'synth_strings_1'],
+  ['Synth Strings 2', 'synth_strings_2'],
   ['Choir Aahs', 'choir_aahs'],
   ['Voice Oohs', 'voice_oohs'],
-  ['Synth Voice', 'synth_voice'],
+  ['Synth Voice', 'synth_choir'],
   ['Orchestra Hit', 'orchestra_hit'],
   ['Trumpet', 'trumpet'],
   ['Trombone', 'trombone'],
@@ -96,8 +96,8 @@ export const GM_PROGRAMS = [
   ['Muted Trumpet', 'muted_trumpet'],
   ['French Horn', 'french_horn'],
   ['Brass Section', 'brass_section'],
-  ['Synth Brass 1', 'synthbrass_1'],
-  ['Synth Brass 2', 'synthbrass_2'],
+  ['Synth Brass 1', 'synth_brass_1'],
+  ['Synth Brass 2', 'synth_brass_2'],
   ['Soprano Sax', 'soprano_sax'],
   ['Alto Sax', 'alto_sax'],
   ['Tenor Sax', 'tenor_sax'],
@@ -121,7 +121,7 @@ export const GM_PROGRAMS = [
   ['Lead 5 (charang)', 'lead_5_charang'],
   ['Lead 6 (voice)', 'lead_6_voice'],
   ['Lead 7 (fifths)', 'lead_7_fifths'],
-  ['Lead 8 (bass + lead)', 'lead_8_bass_lead'],
+  ['Lead 8 (bass + lead)', 'lead_8_bass__lead'],
   ['Pad 1 (new age)', 'pad_1_new_age'],
   ['Pad 2 (warm)', 'pad_2_warm'],
   ['Pad 3 (polysynth)', 'pad_3_polysynth'],
@@ -143,7 +143,7 @@ export const GM_PROGRAMS = [
   ['Shamisen', 'shamisen'],
   ['Koto', 'koto'],
   ['Kalimba', 'kalimba'],
-  ['Bag Pipe', 'bag_pipe'],
+  ['Bag Pipe', 'bagpipe'],
   ['Fiddle', 'fiddle'],
   ['Shanai', 'shanai'],
   ['Tinkle Bell', 'tinkle_bell'],
@@ -206,12 +206,16 @@ export function resolveTrackInstrument(
   override?: string,
 ): Exclude<InstrumentId, 'auto'> {
   if (override && override !== 'auto') {
-    if (override === 'notefall-grand' || override.startsWith('soundfont:')) {
+    if (
+      override === 'notefall-grand' ||
+      override === 'drum:TR-808' ||
+      override.startsWith('soundfont:')
+    ) {
       return override as Exclude<InstrumentId, 'auto'>
     }
   }
 
-  if (track.percussion || track.channel === 9) return 'soundfont:synth_drum'
+  if (track.percussion || track.channel === 9) return 'drum:TR-808'
 
   const program = track.program
   if (program === 0) return 'notefall-grand'

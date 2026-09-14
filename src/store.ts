@@ -55,6 +55,9 @@ export type Settings = {
   // round-trip safety). Unset / missing keys fall back to `noteColor`.
   // Index matches `NoteEvent.track` / `ParsedSong.tracks[i]`.
   trackColors: Record<string, string>
+  // Per-track audio instrument overrides keyed by track index. Missing keys
+  // mean Auto (use MIDI program metadata). Kept outside visual keyframes.
+  trackInstruments: Record<string, string>
   noteEmissive: number
   noteOpacity: number
   noteCornerRadius: number
@@ -372,6 +375,7 @@ export const defaultSettings: Settings = {
   fallDurationSec: 2.5,
   noteColor: '#5ad7ff',
   trackColors: {},
+  trackInstruments: {},
   noteEmissive: 1.0,
   noteOpacity: 1.0,
   noteCornerRadius: 0.05,
@@ -658,6 +662,7 @@ const RESET_PRESERVED_KEYS = [
   'volume',
   'playbackRate',
   // Clip sync + trim ("clip length")
+  'trackInstruments',
   'midiOffsetSec',
   'midiTrimStartSec',
   'midiTrimEndSec',

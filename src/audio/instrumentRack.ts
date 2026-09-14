@@ -1,4 +1,4 @@
-import { Soundfont, type StopFn, type Scheduler } from 'smplr'
+import { DrumMachine, Soundfont, type StopFn, type Scheduler } from 'smplr'
 import type { ParsedSong } from '../midi/types'
 import {
   resolveTrackInstrument,
@@ -33,6 +33,7 @@ type LegacySoundfont = {
 
 export type InstrumentRackOptions = {
   scheduler?: Scheduler
+  onProgress?: (p: LoadProgress) => void
   /** Realtime input/preview needs piano before a song is prepared. */
   eagerGrand?: boolean
 }
@@ -76,6 +77,19 @@ type SoundfontCtor = new (
   options: Record<string, unknown>,
 ) => LegacySoundfont
 
+type LegacyDrumMachine = {
+  load?: Promise<unknown>
+  ready?: Promise<unknown>
+  start(options: { note: string; velocity?: number; time?: number; stopId?: string }): StopFn
+  stop(): void
+  disconnect?: () => void
+}
+
+type DrumMachineCtor = new (
+  context: AudioContext,
+  options: Record<string, unknown>,
+) => LegacyDrumMachine
+
 function waitForSoundfont(instrument: LegacySoundfont): Promise<unknown> {
   return instrument.load ?? instrument.ready ?? Promise.resolve()
 }
@@ -116,6 +130,21 @@ export function planInstrumentRack(
   return ids
 }
 
+function drumNameForMidi(midi: number): string {
+  if (midi === 35 || midi === 36) return 'kick'
+  if (midi === 37) return 'rim-shot'
+  if (midi === 38 || midi === 40) return 'snare'
+  if (midi === 39) return 'clap'
+  if (midi === 42 || midi === 44) return 'closed-hat'
+  if (midi === 46) return 'open-hat'
+  if ([41, 43, 45, 47, 48, 50].includes(midi)) return 'tom'
+  if ([49, 52, 55, 57].includes(midi)) return 'cymbal'
+  if ([51, 53, 59].includes(midi)) return 'cymbal'
+  if (midi === 56) return 'cowbell'
+  if (midi === 70) return 'maracas'
+  return 'snare'
+}
+
 /**
  * Shared realtime/offline instrument router.
  *
@@ -142,6 +171,8 @@ export async function createInstrumentRack(
   let grand: PianoInstrument | null = null
   const soundfonts = new Map<string, LegacySoundfont>()
   const failedSoundfonts = new Set<string>()
+  let drums: LegacyDrumMachine | null = null
+  let drumsFailed = false
   const trackRouting = new Map<number, ResolvedInstrumentId>()
 
   let volume = 1
@@ -154,7 +185,7 @@ export async function createInstrumentRack(
     if (grand) return grand
     grand = await createPiano(
       ctx,
-      onProgress,
+      onProgress ?? options.onProgress,
       options.scheduler ? { scheduler: options.scheduler } : undefined,
     )
     grand.setVolume(volume)
@@ -196,6 +227,31 @@ export async function createInstrumentRack(
     }
   }
 
+  async function ensureDrums(
+    onProgress?: (p: LoadProgress) => void,
+  ): Promise<LegacyDrumMachine | null> {
+    if (drums) return drums
+    if (drumsFailed) return null
+    try {
+      const Ctor = DrumMachine as unknown as DrumMachineCtor
+      const instrument = new Ctor(ctx as AudioContext, {
+        instrument: 'TR-808',
+        destination: soundfontExpression,
+        storage: createSampleStorage(),
+        scheduler: options.scheduler,
+        onLoadProgress: (p: LoadProgress) => (onProgress ?? options.onProgress)?.(p),
+      })
+      await (instrument.load ?? instrument.ready ?? Promise.resolve())
+      drums = instrument
+      return drums
+    } catch (error) {
+      console.warn('Could not load drum machine; falling back to Notefall Grand.', error)
+      drumsFailed = true
+      await ensureGrand(onProgress)
+      return null
+    }
+  }
+
   async function prepare(
     song: ParsedSong,
     assignments: TrackInstrumentAssignments = {},
@@ -217,12 +273,16 @@ export async function createInstrumentRack(
           await ensureGrand(onProgress)
           return
         }
+        if (id === 'drum:TR-808') {
+          await ensureDrums(onProgress)
+          return
+        }
         await ensureSoundfont(id.slice('soundfont:'.length), onProgress)
       }),
     )
   }
 
-  if (options.eagerGrand !== false) await ensureGrand()
+  if (options.eagerGrand !== false) await ensureGrand(options.onProgress)
 
   const rack: InstrumentRack = {
     context: ctx,
@@ -235,6 +295,18 @@ export async function createInstrumentRack(
       if (route === 'notefall-grand') {
         if (!grand) return () => {}
         return grand.start(midi, velocity, atAudioTime, stopId)
+      }
+
+      if (route === 'drum:TR-808') {
+        const drum = drums
+        if (!drum) return grand?.start(midi, velocity, atAudioTime, stopId) ?? (() => {})
+        const note = drumNameForMidi(midi)
+        return drum.start({
+          note,
+          velocity: Math.max(1, Math.min(127, Math.round(velocity * 127))),
+          time: atAudioTime,
+          stopId,
+        })
       }
 
       const name = route.slice('soundfont:'.length)
@@ -255,6 +327,7 @@ export async function createInstrumentRack(
     stopAll() {
       grand?.stopAll()
       for (const instrument of soundfonts.values()) instrument.stop()
+      drums?.stop()
     },
     setVolume(value) {
       volume = Math.max(0, value)
@@ -300,6 +373,7 @@ export async function createInstrumentRack(
       disposed = true
       rack.stopAll()
       grand?.dispose()
+      try { drums?.disconnect?.() } catch { /* already disconnected */ }
       for (const instrument of soundfonts.values()) {
         try { instrument.disconnect?.() } catch { /* already disconnected */ }
       }
