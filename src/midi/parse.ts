@@ -33,13 +33,23 @@ export async function parseMidi(file: ArrayBuffer, name: string): Promise<Parsed
         expressions.push({ time: cc.time, value: cc.value })
       })
     }
+
     // SMF track names are often empty or whitespace; fall back to a
-    // synthetic "Track N" label so the per-track UI has something to
-    // render. The index stays in lockstep with `NoteEvent.track`.
+    // synthetic "Track N" label so the per-track UI has something to render.
+    // @tonejs/midi exposes the track's General MIDI instrument metadata,
+    // which feeds the audio rack's Auto instrument resolver.
     const rawName = (track.name ?? '').trim()
+    const instrument = track.instrument
+    const instrumentName = (instrument?.name ?? '').trim()
+    const instrumentFamily = (instrument?.family ?? '').trim()
     tracks.push({
       name: rawName.length > 0 ? rawName : `Track ${trackIdx + 1}`,
       hasNotes: track.notes.length > 0,
+      channel: Number.isFinite(track.channel) ? track.channel : null,
+      program: Number.isFinite(instrument?.number) ? instrument.number : null,
+      instrumentName: instrumentName.length > 0 ? instrumentName : null,
+      instrumentFamily: instrumentFamily.length > 0 ? instrumentFamily : null,
+      percussion: Boolean(instrument?.percussion),
     })
   })
 
