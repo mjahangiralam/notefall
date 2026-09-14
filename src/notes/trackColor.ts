@@ -9,11 +9,26 @@
  * / Web-MIDI) and for previews — those have no source track and always
  * use the fallback colour.
  */
+
+let keyLineInstallRequested = false
+
+function ensureTrackKeyLines(): void {
+  if (keyLineInstallRequested || typeof window === 'undefined') return
+  keyLineInstallRequested = true
+  void import('./trackKeyLines')
+    .then(({ installTrackKeyLines }) => installTrackKeyLines())
+    .catch(() => {
+      // Let a later frame retry if a transient chunk/HMR load failed.
+      keyLineInstallRequested = false
+    })
+}
+
 export function resolveTrackColorHex(
   trackIdx: number | undefined,
   trackColors: Record<string, string>,
   fallback: string,
 ): string {
+  ensureTrackKeyLines()
   if (trackIdx == null) return fallback
   return trackColors[String(trackIdx)] ?? fallback
 }
