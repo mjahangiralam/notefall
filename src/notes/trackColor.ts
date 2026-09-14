@@ -23,6 +23,11 @@ function ensureTrackKeyLines(): void {
     })
 }
 
+// Keyboard.tsx imports this module unconditionally, so start the overlay as
+// soon as the browser bundle loads. trackKeyLines retries until the R3F scene
+// bridge is mounted; this keeps the feature independent of key-glow settings.
+ensureTrackKeyLines()
+
 export function resolveTrackColorHex(
   trackIdx: number | undefined,
   trackColors: Record<string, string>,
