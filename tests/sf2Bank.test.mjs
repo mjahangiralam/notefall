@@ -53,10 +53,17 @@ test('rejects a bank without a recognisable drum instrument', async () => {
   )
 })
 
-test('SF2 backend fetches through Notefall cache and keeps raw MIDI pitches', async () => {
+test('SF2 backend fetches through Notefall cache and preserves raw GM pitch matching', async () => {
   const source = await readFile(new URL('../src/audio/sf2Bank.ts', import.meta.url), 'utf8').catch(() => '')
   assert.match(source, /options\.fetchBytes\s*\?\?\s*fetchSampleBytes/)
   assert.match(source, /fetchBytes\(GENERALUSER_GS_URL\)/)
-  assert.match(source, /note:\s*midi/)
+  assert.match(source, /matchesMidiZone\(zone,\s*midi\)/)
   assert.doesNotMatch(source, /drumNameForMidi|midi\s*[-+]\s*\d+/)
+})
+
+test('SF2 drum adapter uses direct Web Audio playback instead of upgrading smplr', async () => {
+  const source = await readFile(new URL('../src/audio/sf2Bank.ts', import.meta.url), 'utf8').catch(() => '')
+  assert.match(source, /new\s+SoundFont2\(new\s+Uint8Array\(bytes\)\)/)
+  assert.match(source, /createBufferSource\(\)/)
+  assert.doesNotMatch(source, /Soundfont2\s*[,}]/)
 })
