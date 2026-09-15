@@ -36,3 +36,16 @@ test('rack stops and disposes SF2 drums', async () => {
   assert.match(source, /sf2Drums\?\.stop\(\)/)
   assert.match(source, /sf2Drums\?\.dispose\(\)/)
 })
+
+test('offline rendering uses the shared instrument rack and note track routing', async () => {
+  const source = await readFile(new URL('../src/export/renderAudio.ts', import.meta.url), 'utf8')
+  assert.match(source, /createInstrumentRack/)
+  assert.match(source, /piano\.start\([\s\S]*?n\.track\)/)
+})
+
+test('songs without percussion plan no SF2 backend and percussion routes deduplicate', async () => {
+  const catalogSource = await readFile(new URL('../src/audio/instrumentCatalog.ts', import.meta.url), 'utf8')
+  assert.match(catalogSource, /requiredInstrumentIds/)
+  assert.match(catalogSource, /new Set/)
+  assert.match(catalogSource, /track\.percussion\s*\|\|\s*track\.channel\s*===\s*9[\s\S]*?drum:gm-sf2/)
+})
