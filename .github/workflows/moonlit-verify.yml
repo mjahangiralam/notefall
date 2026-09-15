@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   verify:
@@ -23,7 +23,12 @@ jobs:
           cache: npm
 
       - name: Install dependencies
-        run: npm install --no-audit --no-fund
+        run: npm ci
+
+      - name: Verify asset scripts
+        run: |
+          bash -n scripts/fetch-generaluser-gs.sh
+          bash -n scripts/upload-generaluser-gs-r2.sh
 
       - name: Test
         run: npm test
@@ -33,14 +38,3 @@ jobs:
 
       - name: Build
         run: npm run build
-
-      - name: Commit generated dependency lock
-        if: success()
-        run: |
-          if ! git diff --quiet -- package-lock.json; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add package-lock.json
-            git commit -m "chore: lock SF2 parser dependency"
-            git push origin HEAD:moonlit-reverie-video
-          fi
