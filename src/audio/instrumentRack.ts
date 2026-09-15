@@ -11,6 +11,10 @@ import {
   type PianoInstrument,
 } from './sampler'
 import { createSampleStorage } from './sampleCache'
+import {
+  createGeneralUserDrumBackend,
+  type Sf2DrumBackend,
+} from './sf2Bank'
 
 export type TrackInstrumentAssignments = Record<string, string>
 
@@ -116,20 +120,15 @@ function scheduleGainCurve(
   })
 }
 
-/**
- * Build the unique backend ids required for a song. Kept pure so tests can
- * verify lazy-loading behavior without constructing Web Audio nodes.
- */
+/** Build the unique backends required for the current song. */
 export function planInstrumentRack(
   song: Pick<ParsedSong, 'tracks'>,
   assignments: TrackInstrumentAssignments,
 ): ResolvedInstrumentId[] {
-  const ids = requiredInstrumentIds(song.tracks, assignments)
-  // Live keyboard + editor preview always use the premium piano, but offline
-  // renders do not need to load it unless the song itself needs it.
-  return ids
+  return requiredInstrumentIds(song.tracks, assignments)
 }
 
+/** Legacy TR-808 approximation used only as a percussion fallback/manual choice. */
 function drumNameForMidi(midi: number): string {
   if (midi === 35 || midi === 36) return 'kick'
   if (midi === 37) return 'rim-shot'
@@ -138,22 +137,13 @@ function drumNameForMidi(midi: number): string {
   if (midi === 42 || midi === 44) return 'closed-hat'
   if (midi === 46) return 'open-hat'
   if ([41, 43, 45, 47, 48, 50].includes(midi)) return 'tom'
-  if ([49, 52, 55, 57].includes(midi)) return 'cymbal'
-  if ([51, 53, 59].includes(midi)) return 'cymbal'
+  if ([49, 51, 52, 53, 55, 57, 59].includes(midi)) return 'cymbal'
   if (midi === 56) return 'cowbell'
   if (midi === 70) return 'maracas'
   return 'snare'
 }
 
-/**
- * Shared realtime/offline instrument router.
- *
- * - Premium acoustic piano continues to use Notefall's existing Salamander
- *   sampler and full effect chain.
- * - Other GM programs use smplr Soundfont players, loaded only when needed.
- * - Song notes route by track; live/preview notes (track undefined) use the
- *   premium piano so old input behavior is preserved.
- */
+/** Shared realtime/offline instrument router. */
 export async function createInstrumentRack(
   context?: BaseAudioContext,
   options: InstrumentRackOptions = {},
@@ -171,6 +161,9 @@ export async function createInstrumentRack(
   let grand: PianoInstrument | null = null
   const soundfonts = new Map<string, LegacySoundfont>()
   const failedSoundfonts = new Set<string>()
+  let sf2Drums: Sf2DrumBackend | null = null
+  let sf2DrumsFailed = false
+  let sf2StartFailureLogged = false
   let drums: LegacyDrumMachine | null = null
   let drumsFailed = false
   const trackRouting = new Map<number, ResolvedInstrumentId>()
@@ -204,9 +197,6 @@ export async function createInstrumentRack(
     if (failedSoundfonts.has(name)) return null
 
     try {
-      // smplr 0.20 exposes Soundfont as a class. The constructor is cast to
-      // a narrow compatibility shape so a future factory-style API change can
-      // be adapted here without leaking version details into the engine.
       const Ctor = Soundfont as unknown as SoundfontCtor
       const instrument = new Ctor(ctx as AudioContext, {
         instrument: name,
@@ -245,11 +235,48 @@ export async function createInstrumentRack(
       drums = instrument
       return drums
     } catch (error) {
-      console.warn('Could not load drum machine; falling back to Notefall Grand.', error)
+      console.warn('Could not load TR-808 drum fallback; percussion will be silent.', error)
       drumsFailed = true
-      await ensureGrand(onProgress)
       return null
     }
+  }
+
+  async function ensureSf2Drums(
+    onProgress?: (p: LoadProgress) => void,
+  ): Promise<Sf2DrumBackend | null> {
+    if (sf2Drums) return sf2Drums
+    if (sf2DrumsFailed) {
+      await ensureDrums(onProgress)
+      return null
+    }
+    try {
+      sf2Drums = await createGeneralUserDrumBackend(ctx, {
+        destination: soundfontExpression,
+        scheduler: options.scheduler,
+      })
+      return sf2Drums
+    } catch (error) {
+      console.warn('Could not load GeneralUser GS drums; falling back to TR-808.', error)
+      sf2DrumsFailed = true
+      await ensureDrums(onProgress)
+      return null
+    }
+  }
+
+  function startTr808(
+    midi: number,
+    velocity: number,
+    atAudioTime?: number,
+    stopId?: string,
+  ): StopFn {
+    const drum = drums
+    if (!drum) return () => {}
+    return drum.start({
+      note: drumNameForMidi(midi),
+      velocity: Math.max(1, Math.min(127, Math.round(velocity * 127))),
+      time: atAudioTime,
+      stopId,
+    })
   }
 
   async function prepare(
@@ -271,6 +298,10 @@ export async function createInstrumentRack(
       required.map(async (id) => {
         if (id === 'notefall-grand') {
           await ensureGrand(onProgress)
+          return
+        }
+        if (id === 'drum:gm-sf2') {
+          await ensureSf2Drums(onProgress)
           return
         }
         if (id === 'drum:TR-808') {
@@ -297,16 +328,22 @@ export async function createInstrumentRack(
         return grand.start(midi, velocity, atAudioTime, stopId)
       }
 
+      if (route === 'drum:gm-sf2') {
+        if (sf2Drums) {
+          try {
+            return sf2Drums.start(midi, velocity, atAudioTime, stopId)
+          } catch (error) {
+            if (!sf2StartFailureLogged) {
+              sf2StartFailureLogged = true
+              console.warn('GeneralUser GS drum playback failed; using TR-808 fallback.', error)
+            }
+          }
+        }
+        return startTr808(midi, velocity, atAudioTime, stopId)
+      }
+
       if (route === 'drum:TR-808') {
-        const drum = drums
-        if (!drum) return grand?.start(midi, velocity, atAudioTime, stopId) ?? (() => {})
-        const note = drumNameForMidi(midi)
-        return drum.start({
-          note,
-          velocity: Math.max(1, Math.min(127, Math.round(velocity * 127))),
-          time: atAudioTime,
-          stopId,
-        })
+        return startTr808(midi, velocity, atAudioTime, stopId)
       }
 
       const name = route.slice('soundfont:'.length)
@@ -327,6 +364,7 @@ export async function createInstrumentRack(
     stopAll() {
       grand?.stopAll()
       for (const instrument of soundfonts.values()) instrument.stop()
+      sf2Drums?.stop()
       drums?.stop()
     },
     setVolume(value) {
@@ -373,6 +411,7 @@ export async function createInstrumentRack(
       disposed = true
       rack.stopAll()
       grand?.dispose()
+      try { sf2Drums?.dispose() } catch { /* already disposed */ }
       try { drums?.disconnect?.() } catch { /* already disconnected */ }
       for (const instrument of soundfonts.values()) {
         try { instrument.disconnect?.() } catch { /* already disconnected */ }
@@ -380,6 +419,7 @@ export async function createInstrumentRack(
       try { soundfontExpression.disconnect() } catch { /* already disconnected */ }
       try { soundfontMaster.disconnect() } catch { /* already disconnected */ }
       soundfonts.clear()
+      sf2Drums = null
       trackRouting.clear()
     },
   }
