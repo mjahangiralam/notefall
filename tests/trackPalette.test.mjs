@@ -44,3 +44,14 @@ test('non-note/meta tracks do not consume palette slots', async () => {
   assert.deepEqual(Object.keys(colors), ['1', '3'])
   assert.notEqual(colors['1'], colors['3'])
 })
+
+test('large multi-track MIDI continues generating unique colours after curated palette is exhausted', async () => {
+  const { buildDefaultTrackColors } = await loadModule()
+  const manyTracks = Array.from({ length: 32 }, (_, i) => ({
+    name: `Part ${i + 1}`,
+    hasNotes: true,
+  }))
+  const colors = buildDefaultTrackColors(manyTracks, '#5ad7ff')
+  assert.equal(Object.keys(colors).length, 32)
+  assert.equal(new Set(Object.values(colors).map((c) => c.toLowerCase())).size, 32)
+})
