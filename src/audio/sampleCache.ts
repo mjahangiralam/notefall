@@ -11,9 +11,6 @@ import { HttpStorage, type Storage, type StorageResponse } from 'smplr'
  * user manually clears site data. We wrap our own layer that only
  * stores 200 responses so transient failures self-heal.
  *
- * Versioned cache name (`v2` and up) lets us invalidate on a code
- * deploy if we discover poisoned caches from older builds.
- *
  * Falls back to plain HttpStorage if Cache Storage isn't available
  * (e.g. third-party iframe, very old browser).
  */
@@ -45,11 +42,6 @@ let loggedMiss = false
  * fetch on every call so a deferred file deployment becomes
  * playable as soon as it shows up, instead of being stuck behind
  * a cached failure forever.
- *
- * Uses `Request` + `Response.clone()` (same pattern as smplr's
- * built-in CacheStorage) — passing a synthesised `new Response(ab)`
- * to `cache.put` worked in Chrome but failed silently in some
- * other browsers, leaving the cache permanently empty.
  */
 class StatusFilteredCacheStorage implements Storage {
   constructor(private readonly cacheName: string) {}
@@ -99,13 +91,26 @@ class StatusFilteredCacheStorage implements Storage {
 }
 
 /** Returns the Cache Storage-backed Storage for use with smplr's Smplr
- *  constructor, or the plain HttpStorage fallback. */
+ * constructor, or the plain HttpStorage fallback. */
 export function createSampleStorage(): Storage {
   if (!isSampleCacheAvailable()) return HttpStorage
   // Best-effort cleanup of older cache versions so they don't
   // silently consume disk forever. Fire-and-forget.
   void purgeLegacyCaches()
   return new StatusFilteredCacheStorage(CACHE_NAME)
+}
+
+/**
+ * Fetch a binary sample asset through the exact same successful-response-only
+ * cache used by the existing samplers. This is used by the SF2 adapter so a
+ * failed/404 SoundFont response can never poison persistent Cache Storage.
+ */
+export async function fetchSampleBytes(url: string): Promise<ArrayBuffer> {
+  const response = await createSampleStorage().fetch(url)
+  if (response.status !== 200) {
+    throw new Error(`sample fetch failed: ${url} (${response.status})`)
+  }
+  return response.arrayBuffer()
 }
 
 async function purgeLegacyCaches(): Promise<void> {
@@ -122,10 +127,7 @@ async function purgeLegacyCaches(): Promise<void> {
 /**
  * Returns true if `url` is already present in the cache. Cheap probe
  * used by the UI to decide whether the HQ-piano toggle should warn
- * about a fresh download. A single hit isn't proof the *whole* sample
- * set is cached — but it's a strong signal (the first sample is
- * fetched eagerly and the rest follow), and probing every URL would
- * cost real disk-read time.
+ * about a fresh download.
  */
 export async function isUrlCached(url: string): Promise<boolean> {
   if (!isSampleCacheAvailable()) return false
@@ -138,10 +140,7 @@ export async function isUrlCached(url: string): Promise<boolean> {
   }
 }
 
-/**
- * Drop every cached sample. Used by a "Clear sample cache" action in
- * the settings UI when the user wants to reclaim disk space.
- */
+/** Drop every cached sample. */
 export async function clearSampleCache(): Promise<void> {
   if (!isSampleCacheAvailable()) return
   for (const name of [CACHE_NAME, ...LEGACY_CACHE_NAMES]) {
