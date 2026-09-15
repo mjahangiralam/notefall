@@ -55,7 +55,8 @@ test('rejects a bank without a recognisable drum instrument', async () => {
 
 test('SF2 backend fetches through Notefall cache and keeps raw MIDI pitches', async () => {
   const source = await readFile(new URL('../src/audio/sf2Bank.ts', import.meta.url), 'utf8').catch(() => '')
-  assert.match(source, /fetchSampleBytes\(GENERALUSER_GS_URL\)/)
+  assert.match(source, /options\.fetchBytes\s*\?\?\s*fetchSampleBytes/)
+  assert.match(source, /fetchBytes\(GENERALUSER_GS_URL\)/)
   assert.match(source, /note:\s*midi/)
   assert.doesNotMatch(source, /drumNameForMidi|midi\s*[-+]\s*\d+/)
 })
