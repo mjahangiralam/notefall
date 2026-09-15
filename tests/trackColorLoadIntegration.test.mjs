@@ -9,7 +9,10 @@ async function storeSource() {
 test('opening a different MIDI installs automatic per-track colors', async () => {
   const source = await storeSource()
   assert.match(source, /buildDefaultTrackColors/)
-  assert.match(source, /trackColors:\s*buildDefaultTrackColors\(song\?\.tracks\s*\?\?\s*\[\],\s*settings\.noteColor\)/)
+  assert.match(
+    source,
+    /next\.trackColors\s*=\s*buildDefaultTrackColors\(song\?\.tracks\s*\?\?\s*\[\],\s*settings\.noteColor\)/,
+  )
 })
 
 test('Inspector reset restores the automatic multi-track palette', async () => {
