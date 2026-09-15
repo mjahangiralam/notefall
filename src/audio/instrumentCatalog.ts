@@ -1,6 +1,11 @@
 import type { TrackInfo } from '../midi/types'
 
-export type InstrumentId = 'auto' | 'notefall-grand' | 'drum:TR-808' | `soundfont:${string}`
+export type InstrumentId =
+  | 'auto'
+  | 'notefall-grand'
+  | 'drum:gm-sf2'
+  | 'drum:TR-808'
+  | `soundfont:${string}`
 
 export type InstrumentOption = {
   value: InstrumentId
@@ -161,7 +166,7 @@ export const GM_PROGRAMS = [
   ['Telephone Ring', 'telephone_ring'],
   ['Helicopter', 'helicopter'],
   ['Applause', 'applause'],
-  ['Gunshot', 'gunshot'],
+  ['Sound Effect 8', 'gunshot'],
 ] as const satisfies readonly (readonly [string, string])[]
 
 function groupForProgram(program: number): string {
@@ -208,6 +213,7 @@ export function resolveTrackInstrument(
   if (override && override !== 'auto') {
     if (
       override === 'notefall-grand' ||
+      override === 'drum:gm-sf2' ||
       override === 'drum:TR-808' ||
       override.startsWith('soundfont:')
     ) {
@@ -215,7 +221,7 @@ export function resolveTrackInstrument(
     }
   }
 
-  if (track.percussion || track.channel === 9) return 'drum:TR-808'
+  if (track.percussion || track.channel === 9) return 'drum:gm-sf2'
 
   const program = track.program
   if (program === 0) return 'notefall-grand'
