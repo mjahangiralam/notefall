@@ -60,10 +60,18 @@ test('missing or invalid MIDI program falls back to Notefall Grand', async () =>
   assert.equal(resolveTrackInstrument(track({ program: 999 }), 'auto'), 'notefall-grand')
 })
 
-test('percussion auto-resolves to a drum-oriented fallback', async () => {
+test('percussion auto-resolves to the GM SF2 drum backend', async () => {
   const { resolveTrackInstrument } = await loadModule()
   assert.equal(
     resolveTrackInstrument(track({ program: 0, percussion: true, channel: 9 }), undefined),
+    'drum:gm-sf2',
+  )
+})
+
+test('TR-808 remains available as an explicit percussion override', async () => {
+  const { resolveTrackInstrument } = await loadModule()
+  assert.equal(
+    resolveTrackInstrument(track({ program: 0, percussion: true, channel: 9 }), 'drum:TR-808'),
     'drum:TR-808',
   )
 })
@@ -75,9 +83,11 @@ test('required instrument ids deduplicate tracks that share a backend', async ()
     track({ program: 40, name: 'Second Violin' }),
     track({ program: 0, name: 'Piano' }),
     track({ program: 73, name: 'Flute' }),
+    track({ channel: 9, percussion: true, name: 'Drums A' }),
+    track({ channel: 9, percussion: true, name: 'Drums B' }),
   ]
   assert.deepEqual(
     requiredInstrumentIds(tracks, {}),
-    ['notefall-grand', 'soundfont:flute', 'soundfont:violin'],
+    ['drum:gm-sf2', 'notefall-grand', 'soundfont:flute', 'soundfont:violin'],
   )
 })
