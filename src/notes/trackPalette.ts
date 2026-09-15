@@ -26,6 +26,46 @@ function normalizeHex(hex: string): string {
   return hex.trim().toLowerCase()
 }
 
+function hslToHex(hueDeg: number, saturation: number, lightness: number): string {
+  const h = ((hueDeg % 360) + 360) % 360 / 360
+  const s = Math.max(0, Math.min(1, saturation))
+  const l = Math.max(0, Math.min(1, lightness))
+
+  const hueToRgb = (p: number, q: number, t0: number): number => {
+    let t = t0
+    if (t < 0) t += 1
+    if (t > 1) t -= 1
+    if (t < 1 / 6) return p + (q - p) * 6 * t
+    if (t < 1 / 2) return q
+    if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6
+    return p
+  }
+
+  let r = l
+  let g = l
+  let b = l
+  if (s !== 0) {
+    const q = l < 0.5 ? l * (1 + s) : l + s - l * s
+    const p = 2 * l - q
+    r = hueToRgb(p, q, h + 1 / 3)
+    g = hueToRgb(p, q, h)
+    b = hueToRgb(p, q, h - 1 / 3)
+  }
+
+  const hex = (v: number) => Math.round(v * 255).toString(16).padStart(2, '0')
+  return `#${hex(r)}${hex(g)}${hex(b)}`
+}
+
+// For unusually large orchestral/MIDI arrangements, continue past the curated
+// palette with a deterministic golden-angle hue sequence instead of cycling
+// back to duplicate colours.
+function generatedTrackColor(ordinal: number): string {
+  const hue = (ordinal * 137.508 + 18) % 360
+  const saturation = ordinal % 2 === 0 ? 0.78 : 0.70
+  const lightness = ordinal % 3 === 0 ? 0.58 : 0.64
+  return hslToHex(hue, saturation, lightness)
+}
+
 /**
  * Build explicit default colours for a freshly opened MIDI.
  *
@@ -53,17 +93,16 @@ export function buildDefaultTrackColors(
   result[String(noteTrackIndices[0])] = fallback
   used.add(normalizeHex(fallback))
 
-  let paletteCursor = 0
+  let cursor = 0
   for (let i = 1; i < noteTrackIndices.length; i++) {
-    let color = AUTO_TRACK_PALETTE[paletteCursor % AUTO_TRACK_PALETTE.length]
-    paletteCursor++
+    let color = cursor < AUTO_TRACK_PALETTE.length
+      ? AUTO_TRACK_PALETTE[cursor]
+      : generatedTrackColor(cursor - AUTO_TRACK_PALETTE.length)
+    cursor++
 
-    // Skip collisions with the global fallback or any earlier track. With the
-    // curated palette this normally iterates once, but the guard keeps custom
-    // global colours deterministic too.
     while (used.has(normalizeHex(color))) {
-      color = AUTO_TRACK_PALETTE[paletteCursor % AUTO_TRACK_PALETTE.length]
-      paletteCursor++
+      color = generatedTrackColor(cursor + AUTO_TRACK_PALETTE.length)
+      cursor++
     }
 
     result[String(noteTrackIndices[i])] = color
