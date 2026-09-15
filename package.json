@@ -12,7 +12,9 @@
     "test": "node --test tests/*.test.mjs",
     "fetch-salamander": "bash scripts/fetch-salamander.sh",
     "prepare-salamander": "node scripts/prepare-salamander.mjs",
-    "upload-r2": "bash scripts/upload-r2.sh"
+    "upload-r2": "bash scripts/upload-r2.sh",
+    "fetch-generaluser": "bash scripts/fetch-generaluser-gs.sh",
+    "upload-generaluser-r2": "bash scripts/upload-generaluser-gs-r2.sh"
   },
   "dependencies": {
     "@react-three/drei": "^9.114.0",
