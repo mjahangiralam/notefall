@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   verify:
@@ -34,10 +34,13 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Capture dependency lock
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: sf2-package-lock
-          path: package-lock.json
-          if-no-files-found: error
+      - name: Commit generated dependency lock
+        if: success()
+        run: |
+          if ! git diff --quiet -- package-lock.json; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add package-lock.json
+            git commit -m "chore: lock SF2 parser dependency"
+            git push origin HEAD:moonlit-reverie-video
+          fi
