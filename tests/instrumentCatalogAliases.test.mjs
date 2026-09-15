@@ -29,7 +29,7 @@ test('catalog uses identifiers from the hosted MusyngKite/FluidR3 set', async ()
   assert.equal(GM_PROGRAMS[109][1], 'bagpipe')
 })
 
-test('channel-10/percussion tracks select the sampled drum backend', async () => {
+test('channel-10/percussion tracks select the GM SF2 drum backend', async () => {
   const { resolveTrackInstrument } = await loadModule()
   assert.equal(
     resolveTrackInstrument({
@@ -41,6 +41,6 @@ test('channel-10/percussion tracks select the sampled drum backend', async () =>
       instrumentFamily: null,
       percussion: true,
     }),
-    'drum:TR-808',
+    'drum:gm-sf2',
   )
 })
