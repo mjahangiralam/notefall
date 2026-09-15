@@ -16,6 +16,7 @@ import {
   DEFAULT_VELOCITY_CURVE,
   type VelocityCurve,
 } from './audio/velocityCurve'
+import { buildDefaultTrackColors } from './notes/trackPalette'
 
 // Cap on the in-memory undo stack. 50 individual edits is plenty for a
 // session of editing without tipping into multi-MB snapshot retention on
@@ -699,7 +700,8 @@ const RESET_PRESERVED_KEYS = [
  * `defaultSettings[k]`.
  */
 const SONG_TIED_KEYS = [
-  // Per-track instrument choices belong to the loaded MIDI's track indices.
+  // Per-track visual/audio choices belong to the loaded MIDI's track indices.
+  'trackColors',
   'trackInstruments',
   // Pins
   'settingsKeyframes',
@@ -963,6 +965,7 @@ export const useStore = create<AppState>((set) => ({
       if (opts?.resetTimeline) {
         const next = { ...settings } as Record<string, unknown>
         for (const k of SONG_TIED_KEYS) next[k as string] = defaultSettings[k]
+        next.trackColors = buildDefaultTrackColors(song?.tracks ?? [], settings.noteColor)
         settings = next as Settings
       }
       return {
@@ -1420,6 +1423,10 @@ export const useStore = create<AppState>((set) => ({
         for (const k of RESET_PRESERVED_KEYS) {
           ;(settings as Record<string, unknown>)[k as string] = state.settings[k]
         }
+        settings.trackColors = buildDefaultTrackColors(
+          state.song?.tracks ?? [],
+          settings.noteColor,
+        )
       }
       return {
         settings,
