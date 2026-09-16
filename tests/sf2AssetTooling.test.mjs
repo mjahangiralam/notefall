@@ -26,3 +26,17 @@ test('git policy keeps other sample assets ignored but explicitly tracks General
   assert.match(source, /!public\/samples\/generaluser-gs-2\.0\.3\//)
   assert.match(source, /!public\/samples\/generaluser-gs-2\.0\.3\/GeneralUser-GS\.sf2/)
 })
+
+test('package installs the supported SpessaSynth browser library and prepares its worklet', async () => {
+  const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
+  assert.match(pkg.dependencies?.spessasynth_lib ?? '', /^\^?4\.3\./)
+  assert.match(pkg.scripts?.postinstall ?? '', /prepare-spessasynth/)
+  assert.match(pkg.scripts?.['prepare-spessasynth'] ?? '', /scripts\/prepare-spessasynth\.mjs/)
+})
+
+test('SpessaSynth preparation copies the matching processor into public', async () => {
+  const source = await readFile(new URL('../scripts/prepare-spessasynth.mjs', import.meta.url), 'utf8').catch(() => '')
+  assert.match(source, /node_modules[\\/]spessasynth_lib[\\/]dist[\\/]spessasynth_processor\.min\.js/)
+  assert.match(source, /public[\\/]spessasynth_processor\.min\.js/)
+  assert.match(source, /copyFile/)
+})
