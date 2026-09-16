@@ -25,10 +25,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Verify asset scripts
-        run: |
-          bash -n scripts/fetch-generaluser-gs.sh
-          bash -n scripts/upload-generaluser-gs-r2.sh
+      - name: Verify GeneralUser fetch script
+        run: bash -n scripts/fetch-generaluser-gs.sh
 
       - name: Test
         run: npm test
