@@ -1,5 +1,6 @@
 import type { StopFn } from 'smplr'
-import { SoundFont2 } from 'soundfont2'
+import { WorkletSynthesizer } from 'spessasynth_lib'
+import { SoundBankLoader, SpessaSynthProcessor } from 'spessasynth_core'
 import { fetchSampleBytes } from './sampleCache'
 
 export const GENERALUSER_GS_VERSION = '2.0.3'
@@ -8,109 +9,237 @@ const GENERALUSER_GS_PATH =
   `generaluser-gs-${GENERALUSER_GS_VERSION}/GeneralUser-GS.sf2`
 
 export const GENERALUSER_GS_URL = `/samples/${GENERALUSER_GS_PATH}`
+export const SPESSASYNTH_WORKLET_URL = '/spessasynth_processor.min.js'
+
+const POWER_DRUM_CHANNEL = 9
+const POWER_KIT_PROGRAM = 16
+const ORCHESTRAL_DRUM_CHANNEL = 8
+const ORCHESTRAL_KIT_PROGRAM = 48
+const ORCHESTRAL_BANK_MSB = 120
+const RENDER_QUANTUM = 128
+
+export type Sf2DrumKit = 'power' | 'orchestral'
 
 export type Sf2DrumBackend = {
   readonly instrumentName: string
-  start(midi: number, velocity: number, time?: number, stopId?: string): StopFn
+  start(
+    midi: number,
+    velocity: number,
+    time?: number,
+    stopId?: string,
+    kit?: Sf2DrumKit,
+  ): StopFn
+  /**
+   * Offline contexts accumulate note events. Call this before
+   * OfflineAudioContext.startRendering() to materialize those events into a
+   * normal AudioBufferSourceNode attached to the rack's destination.
+   */
+  finalizeOffline?(durationSeconds: number): Promise<void>
   stop(): void
   dispose(): void
 }
 
 export type Sf2DrumBackendOptions = {
   destination?: AudioNode
-  /** Kept for rack call-site compatibility; Web Audio schedules directly. */
+  /** Kept for rack call-site compatibility. SpessaSynth schedules itself. */
   scheduler?: unknown
   fetchBytes?: (url: string) => Promise<ArrayBuffer>
 }
 
-type Sf2SampleHeader = {
-  name: string
-  sampleRate: number
-  originalPitch: number
-  pitchCorrection: number
+type OfflineDrumEvent = {
+  time: number
+  midi: number
+  velocity: number
+  kit: Sf2DrumKit
+  order: number
 }
 
-type Sf2Sample = {
-  data: Int16Array
-  header: Sf2SampleHeader
+const workletLoads = new WeakMap<BaseAudioContext, Promise<void>>()
+
+function isOfflineContext(context: BaseAudioContext): context is OfflineAudioContext {
+  return typeof (context as OfflineAudioContext).startRendering === 'function'
 }
 
-type Sf2Zone = {
-  sample?: Sf2Sample
-  keyRange?: { lo: number; hi: number }
-}
-
-type Sf2Instrument = {
-  header: { name: string }
-  zones: Sf2Zone[]
-}
-
-type ParsedSf2 = {
-  instruments: Sf2Instrument[]
-}
-
-type PreparedZone = {
-  sample: Sf2Sample
-  keyRange?: { lo: number; hi: number }
-  buffer: AudioBuffer
-}
-
-const DRUM_NAME_PREFERENCES = [
-  /standard(?:\s*1)?(?:\s+kit)?/i,
-  /room(?:\s+kit)?/i,
-  /power(?:\s+kit)?/i,
-  /orchestr(?:a|al)(?:\s+kit)?/i,
-] as const
-
-/**
- * Pick a stable GeneralUser drum instrument from the names exposed by the SF2
- * parser. The patterns tolerate parsers that omit the trailing "Kit" label.
- */
-export function selectGeneralUserDrumInstrument(
-  names: readonly string[],
-): string {
-  for (const pattern of DRUM_NAME_PREFERENCES) {
-    const match = names.find((name) => pattern.test(name))
-    if (match) return match
+async function ensureSpessaWorklet(context: BaseAudioContext): Promise<void> {
+  const audioWorklet = context.audioWorklet
+  let load = workletLoads.get(context)
+  if (!load) {
+    load = audioWorklet.addModule(SPESSASYNTH_WORKLET_URL)
+    workletLoads.set(context, load)
   }
-
-  const generic = names.find((name) => /(?:drum|kit|percussion)/i.test(name))
-  if (generic) return generic
-
-  throw new Error('GeneralUser GS does not expose a recognisable drum kit')
+  await load
 }
 
-function matchesMidiZone(zone: PreparedZone, midi: number): boolean {
-  const range = zone.keyRange
-  return !range || (midi >= range.lo && midi <= range.hi)
+function midiVelocity(velocity: number): number {
+  const scaled = velocity <= 1 ? velocity * 127 : velocity
+  return Math.max(1, Math.min(127, Math.round(scaled)))
 }
 
-function createAudioBuffer(
+function channelForKit(kit: Sf2DrumKit): number {
+  return kit === 'orchestral' ? ORCHESTRAL_DRUM_CHANNEL : POWER_DRUM_CHANNEL
+}
+
+function configureRealtimeKits(synth: WorkletSynthesizer): void {
+  synth.programChange(POWER_DRUM_CHANNEL, POWER_KIT_PROGRAM)
+  synth.controllerChange(ORCHESTRAL_DRUM_CHANNEL, 0, ORCHESTRAL_BANK_MSB)
+  synth.programChange(ORCHESTRAL_DRUM_CHANNEL, ORCHESTRAL_KIT_PROGRAM)
+}
+
+function configureOfflineKits(synth: SpessaSynthProcessor): void {
+  synth.programChange(POWER_DRUM_CHANNEL, POWER_KIT_PROGRAM)
+  synth.controllerChange(ORCHESTRAL_DRUM_CHANNEL, 0, ORCHESTRAL_BANK_MSB)
+  synth.programChange(ORCHESTRAL_DRUM_CHANNEL, ORCHESTRAL_KIT_PROGRAM)
+}
+
+async function createRealtimeBackend(
   context: BaseAudioContext,
-  sample: Sf2Sample,
-): AudioBuffer {
-  const data = sample.data
-  const sampleRate = sample.header.sampleRate
-  const buffer = context.createBuffer(1, data.length, sampleRate)
-  const channel = buffer.getChannelData(0)
-  for (let i = 0; i < data.length; i++) channel[i] = data[i] / 32768
-  return buffer
+  bytes: ArrayBuffer,
+  destination: AudioNode,
+): Promise<Sf2DrumBackend> {
+  await ensureSpessaWorklet(context)
+
+  const synth = new WorkletSynthesizer(context, { eventsEnabled: false })
+  synth.connect(destination)
+  await synth.soundBankManager.addSoundBank(
+    bytes,
+    `generaluser-gs-${GENERALUSER_GS_VERSION}`,
+  )
+  await synth.isReady
+  configureRealtimeKits(synth)
+
+  let disposed = false
+
+  return {
+    instrumentName: 'GeneralUser GS Power / Orchestral Kits',
+    start(midi, velocity, time, _stopId, kit = 'power') {
+      if (disposed) return () => {}
+      const channel = channelForKit(kit)
+      const eventOptions = time === undefined
+        ? undefined
+        : { time: Math.max(context.currentTime, time) }
+      synth.noteOn(channel, midi, midiVelocity(velocity), eventOptions)
+
+      // Percussion samples should ring to their natural decay. The MIDI files
+      // used by Notefall often encode drums as very short notes, so forwarding
+      // their note-off would clip cymbal/tom tails.
+      return () => {}
+    },
+    stop() {
+      if (!disposed) synth.stopAll(true)
+    },
+    dispose() {
+      if (disposed) return
+      disposed = true
+      try { synth.stopAll(true) } catch { /* already stopped */ }
+      try { synth.destroy() } catch { /* already destroyed */ }
+    },
+  }
 }
 
-function velocityGain(velocity: number): number {
-  const normalized = velocity > 1 ? velocity / 127 : velocity
-  return Math.max(0, Math.min(1, normalized))
+async function createOfflineBackend(
+  context: OfflineAudioContext,
+  bytes: ArrayBuffer,
+  destination: AudioNode,
+): Promise<Sf2DrumBackend> {
+  const events: OfflineDrumEvent[] = []
+  let nextOrder = 0
+  let disposed = false
+  let finalized = false
+  let renderedSource: AudioBufferSourceNode | null = null
+
+  return {
+    instrumentName: 'GeneralUser GS Power / Orchestral Kits (offline)',
+    start(midi, velocity, time, _stopId, kit = 'power') {
+      if (disposed || finalized) return () => {}
+      events.push({
+        time: Math.max(0, time ?? 0),
+        midi,
+        velocity: midiVelocity(velocity),
+        kit,
+        order: nextOrder++,
+      })
+      return () => {}
+    },
+    async finalizeOffline(durationSeconds) {
+      if (disposed || finalized) return
+      finalized = true
+
+      const sampleRate = context.sampleRate
+      const sampleCount = Math.max(1, Math.ceil(durationSeconds * sampleRate))
+      const left = new Float32Array(sampleCount)
+      const right = new Float32Array(sampleCount)
+
+      const synth = new SpessaSynthProcessor(sampleRate)
+      synth.soundBankManager.addSoundBank(
+        SoundBankLoader.fromArrayBuffer(bytes),
+        `generaluser-gs-${GENERALUSER_GS_VERSION}`,
+      )
+      await synth.processorInitialized
+      configureOfflineKits(synth)
+
+      const scheduled = events
+        .slice()
+        .sort((a, b) => a.time - b.time || a.order - b.order)
+      let eventIndex = 0
+      let rendered = 0
+
+      while (rendered < sampleCount) {
+        while (
+          eventIndex < scheduled.length &&
+          Math.round(scheduled[eventIndex].time * sampleRate) <= rendered
+        ) {
+          const event = scheduled[eventIndex++]
+          synth.noteOn(
+            channelForKit(event.kit),
+            event.midi,
+            event.velocity,
+          )
+        }
+
+        const nextEventFrame = eventIndex < scheduled.length
+          ? Math.max(rendered, Math.round(scheduled[eventIndex].time * sampleRate))
+          : sampleCount
+        const untilEvent = Math.max(1, nextEventFrame - rendered)
+        const count = Math.min(RENDER_QUANTUM, untilEvent, sampleCount - rendered)
+        synth.process(left, right, rendered, count)
+        rendered += count
+      }
+
+      const buffer = context.createBuffer(2, sampleCount, sampleRate)
+      buffer.copyToChannel(left, 0)
+      buffer.copyToChannel(right, 1)
+      const source = context.createBufferSource()
+      source.buffer = buffer
+      source.connect(destination)
+      source.start(0)
+      renderedSource = source
+    },
+    stop() {
+      events.length = 0
+      if (renderedSource) {
+        try { renderedSource.stop() } catch { /* already stopped */ }
+      }
+    },
+    dispose() {
+      if (disposed) return
+      disposed = true
+      events.length = 0
+      if (renderedSource) {
+        try { renderedSource.disconnect() } catch { /* already disconnected */ }
+        renderedSource = null
+      }
+    },
+  }
 }
 
 /**
- * Parse GeneralUser GS and play its drum instrument directly with Web Audio.
- * This intentionally does not upgrade Notefall's existing smplr dependency:
- * the proven Salamander piano and melodic backends stay on smplr 0.20 while
- * this isolated percussion adapter uses soundfont2 only for parsing.
+ * GeneralUser GS percussion backend.
  *
- * Raw MIDI percussion pitches select SF2 key zones unchanged. Each matching
- * zone becomes an AudioBufferSourceNode, so scheduling works identically in
- * realtime AudioContext and OfflineAudioContext export.
+ * Realtime playback uses SpessaSynth's AudioWorklet wrapper so the SoundFont
+ * modulators, envelopes, exclusive classes and kit behavior are honored.
+ * Offline export uses the same SpessaSynth synthesis core to render PCM before
+ * OfflineAudioContext.startRendering(), avoiding Chromium's documented
+ * limitation around ordinary worklet messages in offline contexts.
  */
 export async function createGeneralUserDrumBackend(
   context: BaseAudioContext,
@@ -118,94 +247,10 @@ export async function createGeneralUserDrumBackend(
 ): Promise<Sf2DrumBackend> {
   const fetchBytes = options.fetchBytes ?? fetchSampleBytes
   const bytes = await fetchBytes(GENERALUSER_GS_URL)
-  const parsed = new SoundFont2(new Uint8Array(bytes)) as unknown as ParsedSf2
-  const instrumentName = selectGeneralUserDrumInstrument(
-    parsed.instruments.map((instrument) => instrument.header.name),
-  )
-  const instrument = parsed.instruments.find(
-    (candidate) => candidate.header.name === instrumentName,
-  )
-  if (!instrument) {
-    throw new Error(`GeneralUser GS drum instrument "${instrumentName}" is missing`)
-  }
-
-  const bufferCache = new Map<Sf2Sample, AudioBuffer>()
-  const zones: PreparedZone[] = []
-  for (const zone of instrument.zones) {
-    const sample = zone.sample
-    if (!sample || sample.data.length === 0) continue
-    let buffer = bufferCache.get(sample)
-    if (!buffer) {
-      buffer = createAudioBuffer(context, sample)
-      bufferCache.set(sample, buffer)
-    }
-    zones.push({ sample, keyRange: zone.keyRange, buffer })
-  }
-  if (zones.length === 0) {
-    throw new Error(`GeneralUser GS drum instrument "${instrumentName}" has no playable samples`)
-  }
-
   const destination = options.destination ?? context.destination
-  const active = new Set<AudioBufferSourceNode>()
-  let disposed = false
 
-  function stopSource(source: AudioBufferSourceNode): void {
-    try { source.stop() } catch { /* already ended/stopped */ }
-    active.delete(source)
-    try { source.disconnect() } catch { /* already disconnected */ }
+  if (isOfflineContext(context)) {
+    return createOfflineBackend(context, bytes, destination)
   }
-
-  return {
-    instrumentName,
-    start(midi, velocity, time, _stopId) {
-      if (disposed) return () => {}
-
-      const matching = zones.filter((zone) => matchesMidiZone(zone, midi))
-      if (matching.length === 0) return () => {}
-
-      const started: AudioBufferSourceNode[] = []
-      for (const zone of matching) {
-        const source = context.createBufferSource()
-        const gain = context.createGain()
-        source.buffer = zone.buffer
-
-        // Instrument-zone samples are normally recorded for their GM drum
-        // key. Preserve the incoming MIDI key and only pitch-shift when a
-        // zone deliberately spans more than one key.
-        const nativePitch = zone.sample.header.originalPitch
-        source.playbackRate.value = Math.pow(2, (midi - nativePitch) / 12)
-        if (zone.sample.header.pitchCorrection) {
-          source.detune.value = -zone.sample.header.pitchCorrection
-        }
-
-        gain.gain.value = velocityGain(velocity)
-        source.connect(gain)
-        gain.connect(destination)
-        active.add(source)
-        started.push(source)
-
-        source.onended = () => {
-          active.delete(source)
-          try { source.disconnect() } catch { /* already disconnected */ }
-          try { gain.disconnect() } catch { /* already disconnected */ }
-        }
-
-        const startAt = Math.max(context.currentTime, time ?? context.currentTime)
-        source.start(startAt)
-      }
-
-      return () => {
-        for (const source of started) stopSource(source)
-      }
-    },
-    stop() {
-      for (const source of [...active]) stopSource(source)
-    },
-    dispose() {
-      if (disposed) return
-      disposed = true
-      for (const source of [...active]) stopSource(source)
-      bufferCache.clear()
-    },
-  }
+  return createRealtimeBackend(context, bytes, destination)
 }
