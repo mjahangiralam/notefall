@@ -1,57 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
-import ts from 'typescript'
-
-async function loadPureModule() {
-  const url = new URL('../src/audio/sf2Bank.ts', import.meta.url)
-  let source = ''
-  try {
-    source = await readFile(url, 'utf8')
-  } catch {
-    assert.fail('src/audio/sf2Bank.ts is missing; implement the GeneralUser GS drum backend')
-  }
-
-  // The selection helper is intentionally pure. Remove runtime imports and
-  // trim the module before the backend factory so these unit tests exercise
-  // the real selection implementation without constructing Web Audio nodes.
-  source = source
-    .replace(/^import[^\n]*\n/gm, '')
-    .split('export async function createGeneralUserDrumBackend')[0]
-
-  const { outputText } = ts.transpileModule(source, {
-    compilerOptions: {
-      module: ts.ModuleKind.ES2022,
-      target: ts.ScriptTarget.ES2022,
-    },
-    fileName: 'sf2Bank.ts',
-  })
-  return import(`data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`)
-}
-
-test('prefers a standard drum kit name', async () => {
-  const { selectGeneralUserDrumInstrument } = await loadPureModule()
-  assert.equal(
-    selectGeneralUserDrumInstrument(['Power Kit', 'Standard Kit', 'Orchestra Kit']),
-    'Standard Kit',
-  )
-})
-
-test('accepts orchestra kit when standard is unavailable', async () => {
-  const { selectGeneralUserDrumInstrument } = await loadPureModule()
-  assert.equal(
-    selectGeneralUserDrumInstrument(['Warm Strings', 'Orchestra Kit']),
-    'Orchestra Kit',
-  )
-})
-
-test('rejects a bank without a recognisable drum instrument', async () => {
-  const { selectGeneralUserDrumInstrument } = await loadPureModule()
-  assert.throws(
-    () => selectGeneralUserDrumInstrument(['Violin', 'Flute']),
-    /drum kit/i,
-  )
-})
 
 test('GeneralUser bank is loaded from the repo-hosted public asset', async () => {
   const source = await readFile(new URL('../src/audio/sf2Bank.ts', import.meta.url), 'utf8').catch(() => '')
@@ -59,17 +8,41 @@ test('GeneralUser bank is loaded from the repo-hosted public asset', async () =>
   assert.doesNotMatch(source, /samples\.notefall\.app/)
 })
 
-test('SF2 backend fetches through Notefall cache and preserves raw GM pitch matching', async () => {
+test('drum backend uses SpessaSynth instead of raw AudioBuffer sample playback', async () => {
+  const source = await readFile(new URL('../src/audio/sf2Bank.ts', import.meta.url), 'utf8').catch(() => '')
+  assert.match(source, /import\s*\{\s*WorkletSynthesizer\s*\}\s*from\s*['"]spessasynth_lib['"]/)
+  assert.match(source, /new\s+WorkletSynthesizer\(/)
+  assert.doesNotMatch(source, /new\s+SoundFont2\(/)
+  assert.doesNotMatch(source, /createBufferSource\(/)
+})
+
+test('SpessaSynth worklet is registered from the local public asset', async () => {
+  const source = await readFile(new URL('../src/audio/sf2Bank.ts', import.meta.url), 'utf8').catch(() => '')
+  assert.match(source, /SPESSASYNTH_WORKLET_URL\s*=\s*['"]\/spessasynth_processor\.min\.js['"]/)
+  assert.match(source, /audioWorklet\.addModule\(SPESSASYNTH_WORKLET_URL\)/)
+})
+
+test('GeneralUser bytes still load through the Notefall sample cache', async () => {
   const source = await readFile(new URL('../src/audio/sf2Bank.ts', import.meta.url), 'utf8').catch(() => '')
   assert.match(source, /options\.fetchBytes\s*\?\?\s*fetchSampleBytes/)
   assert.match(source, /fetchBytes\(GENERALUSER_GS_URL\)/)
-  assert.match(source, /matchesMidiZone\(zone,\s*midi\)/)
-  assert.doesNotMatch(source, /drumNameForMidi|midi\s*[-+]\s*\d+/)
+  assert.match(source, /soundBankManager\.addSoundBank\(bytes,/)
 })
 
-test('SF2 drum adapter uses direct Web Audio playback instead of upgrading smplr', async () => {
+test('Power and orchestral GeneralUser kits are configured on separate channels', async () => {
   const source = await readFile(new URL('../src/audio/sf2Bank.ts', import.meta.url), 'utf8').catch(() => '')
-  assert.match(source, /new\s+SoundFont2\(new\s+Uint8Array\(bytes\)\)/)
-  assert.match(source, /createBufferSource\(\)/)
-  assert.doesNotMatch(source, /Soundfont2\s*[,}]/)
+  assert.match(source, /POWER_DRUM_CHANNEL\s*=\s*9/)
+  assert.match(source, /POWER_KIT_PROGRAM\s*=\s*16/)
+  assert.match(source, /ORCHESTRAL_DRUM_CHANNEL\s*=\s*8/)
+  assert.match(source, /ORCHESTRAL_KIT_PROGRAM\s*=\s*48/)
+  assert.match(source, /controllerChange\(ORCHESTRAL_DRUM_CHANNEL,\s*0,\s*120\)/)
+  assert.match(source, /programChange\(POWER_DRUM_CHANNEL,\s*POWER_KIT_PROGRAM\)/)
+  assert.match(source, /programChange\(ORCHESTRAL_DRUM_CHANNEL,\s*ORCHESTRAL_KIT_PROGRAM\)/)
+})
+
+test('drum notes preserve raw GM pitch and are not cut off by short MIDI note durations', async () => {
+  const source = await readFile(new URL('../src/audio/sf2Bank.ts', import.meta.url), 'utf8').catch(() => '')
+  assert.match(source, /synth\.noteOn\(channel,\s*midi,\s*midiVelocity,/)
+  assert.doesNotMatch(source, /drumNameForMidi|midi\s*[-+]\s*\d+/)
+  assert.doesNotMatch(source, /synth\.noteOff\(/)
 })
