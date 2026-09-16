@@ -4,6 +4,7 @@ export type InstrumentId =
   | 'auto'
   | 'notefall-grand'
   | 'drum:gm-sf2'
+  | 'drum:gm-sf2-orchestral'
   | 'drum:TR-808'
   | `soundfont:${string}`
 
@@ -214,6 +215,7 @@ export function resolveTrackInstrument(
     if (
       override === 'notefall-grand' ||
       override === 'drum:gm-sf2' ||
+      override === 'drum:gm-sf2-orchestral' ||
       override === 'drum:TR-808' ||
       override.startsWith('soundfont:')
     ) {
@@ -221,7 +223,11 @@ export function resolveTrackInstrument(
     }
   }
 
-  if (track.percussion || track.channel === 9) return 'drum:gm-sf2'
+  if (track.percussion || track.channel === 9) {
+    const percussionName = `${track.name ?? ''} ${track.instrumentName ?? ''}`
+    if (/orchestr/i.test(percussionName)) return 'drum:gm-sf2-orchestral'
+    return 'drum:gm-sf2'
+  }
 
   const program = track.program
   if (program === 0) return 'notefall-grand'

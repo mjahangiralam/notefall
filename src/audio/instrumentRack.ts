@@ -14,6 +14,7 @@ import { createSampleStorage } from './sampleCache'
 import {
   createGeneralUserDrumBackend,
   type Sf2DrumBackend,
+  type Sf2DrumKit,
 } from './sf2Bank'
 
 export type TrackInstrumentAssignments = Record<string, string>
@@ -57,6 +58,7 @@ export type InstrumentRack = {
     track?: number,
   ): StopFn
   stopAll(): void
+  finalizeOffline(durationSeconds: number): Promise<void>
   setVolume(value: number): void
   setExpression(value: number): void
   scheduleExpression(points: readonly { time: number; value: number }[]): void
@@ -279,6 +281,26 @@ export async function createInstrumentRack(
     })
   }
 
+  function startSf2Kit(
+    kit: Sf2DrumKit,
+    midi: number,
+    velocity: number,
+    atAudioTime?: number,
+    stopId?: string,
+  ): StopFn {
+    if (sf2Drums) {
+      try {
+        return sf2Drums.start(midi, velocity, atAudioTime, stopId, kit)
+      } catch (error) {
+        if (!sf2StartFailureLogged) {
+          sf2StartFailureLogged = true
+          console.warn('GeneralUser GS drum playback failed; using TR-808 fallback.', error)
+        }
+      }
+    }
+    return startTr808(midi, velocity, atAudioTime, stopId)
+  }
+
   async function prepare(
     song: ParsedSong,
     assignments: TrackInstrumentAssignments = {},
@@ -300,7 +322,7 @@ export async function createInstrumentRack(
           await ensureGrand(onProgress)
           return
         }
-        if (id === 'drum:gm-sf2') {
+        if (id === 'drum:gm-sf2' || id === 'drum:gm-sf2-orchestral') {
           await ensureSf2Drums(onProgress)
           return
         }
@@ -329,17 +351,11 @@ export async function createInstrumentRack(
       }
 
       if (route === 'drum:gm-sf2') {
-        if (sf2Drums) {
-          try {
-            return sf2Drums.start(midi, velocity, atAudioTime, stopId)
-          } catch (error) {
-            if (!sf2StartFailureLogged) {
-              sf2StartFailureLogged = true
-              console.warn('GeneralUser GS drum playback failed; using TR-808 fallback.', error)
-            }
-          }
-        }
-        return startTr808(midi, velocity, atAudioTime, stopId)
+        return startSf2Kit('power', midi, velocity, atAudioTime, stopId)
+      }
+
+      if (route === 'drum:gm-sf2-orchestral') {
+        return startSf2Kit('orchestral', midi, velocity, atAudioTime, stopId)
       }
 
       if (route === 'drum:TR-808') {
@@ -366,6 +382,9 @@ export async function createInstrumentRack(
       for (const instrument of soundfonts.values()) instrument.stop()
       sf2Drums?.stop()
       drums?.stop()
+    },
+    async finalizeOffline(durationSeconds) {
+      await sf2Drums?.finalizeOffline?.(durationSeconds)
     },
     setVolume(value) {
       volume = Math.max(0, value)

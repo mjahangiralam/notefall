@@ -322,6 +322,10 @@ export async function renderSongAudio(
     }
   }
 
+  if (piano) {
+    await raceWithAbort(piano.finalizeOffline(totalDuration), signal)
+  }
+
   if (signal?.aborted) {
     piano?.dispose()
     throw new AudioRenderAborted()
