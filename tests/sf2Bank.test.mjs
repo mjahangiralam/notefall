@@ -53,6 +53,12 @@ test('rejects a bank without a recognisable drum instrument', async () => {
   )
 })
 
+test('GeneralUser bank is loaded from the repo-hosted public asset', async () => {
+  const source = await readFile(new URL('../src/audio/sf2Bank.ts', import.meta.url), 'utf8').catch(() => '')
+  assert.match(source, /GENERALUSER_GS_URL\s*=\s*`\/samples\/\$\{GENERALUSER_GS_PATH\}`/)
+  assert.doesNotMatch(source, /samples\.notefall\.app/)
+})
+
 test('SF2 backend fetches through Notefall cache and preserves raw GM pitch matching', async () => {
   const source = await readFile(new URL('../src/audio/sf2Bank.ts', import.meta.url), 'utf8').catch(() => '')
   assert.match(source, /options\.fetchBytes\s*\?\?\s*fetchSampleBytes/)
