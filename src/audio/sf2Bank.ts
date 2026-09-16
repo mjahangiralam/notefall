@@ -7,9 +7,7 @@ export const GENERALUSER_GS_VERSION = '2.0.3'
 const GENERALUSER_GS_PATH =
   `generaluser-gs-${GENERALUSER_GS_VERSION}/GeneralUser-GS.sf2`
 
-export const GENERALUSER_GS_URL = import.meta.env?.DEV
-  ? `/samples-cdn/${GENERALUSER_GS_PATH}`
-  : `https://samples.notefall.app/${GENERALUSER_GS_PATH}`
+export const GENERALUSER_GS_URL = `/samples/${GENERALUSER_GS_PATH}`
 
 export type Sf2DrumBackend = {
   readonly instrumentName: string
