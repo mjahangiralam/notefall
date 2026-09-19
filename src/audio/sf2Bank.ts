@@ -1,4 +1,5 @@
 import type { StopFn } from 'smplr'
+import { getContext } from 'tone'
 import { WorkletSynthesizer } from 'spessasynth_lib'
 import { SoundBankLoader, SpessaSynthProcessor } from 'spessasynth_core'
 import { fetchSampleBytes } from './sampleCache'
@@ -93,7 +94,18 @@ async function createRealtimeBackend(
 ): Promise<Sf2DrumBackend> {
   await ensureSpessaWorklet(context)
 
-  const synth = new WorkletSynthesizer(context, { eventsEnabled: false })
+  // Tone.js uses standardized-audio-context wrappers. A native
+  // AudioWorkletNode rejects the wrapped context with a BaseAudioContext
+  // TypeError. Construct the node through Tone's own factory so it joins
+  // the same audio graph; SpessaSynth explicitly supports this override.
+  const toneContext = getContext()
+  const synth = new WorkletSynthesizer(context, {
+    eventsEnabled: false,
+    audioNodeCreators: {
+      worklet: (_audioContext, name, options) =>
+        toneContext.createAudioWorkletNode(name, options) as unknown as AudioWorkletNode,
+    },
+  })
   synth.connect(destination)
   await synth.soundBankManager.addSoundBank(
     bytes,
@@ -101,6 +113,7 @@ async function createRealtimeBackend(
   )
   await synth.isReady
   configureRealtimeKits(synth)
+  console.info('[NoteFall drums] Premium Drum Collection ready:', PREMIUM_DRUM_SF2_URL)
 
   let disposed = false
 
@@ -113,10 +126,7 @@ async function createRealtimeBackend(
         ? undefined
         : { time: Math.max(context.currentTime, time) }
       synth.noteOn(channel, midi, midiVelocity(velocity), eventOptions)
-
-      // Percussion samples should ring to their natural decay. The MIDI files
-      // used by Notefall often encode drums as very short notes, so forwarding
-      // their note-off would clip cymbal/tom tails.
+      // Short MIDI note-offs must not clip cymbal or tom tails.
       return () => {}
     },
     stop() {
@@ -227,15 +237,7 @@ async function createOfflineBackend(
   }
 }
 
-/**
- * Premium Drum Collection percussion backend.
- *
- * Realtime playback uses SpessaSynth's AudioWorklet wrapper so the SoundFont
- * modulators, envelopes, exclusive classes and kit behavior are honored.
- * Offline export uses the same SpessaSynth synthesis core to render PCM before
- * OfflineAudioContext.startRendering(), avoiding Chromium's documented
- * limitation around ordinary worklet messages in offline contexts.
- */
+/** Premium SF2 playback and offline export share the same bank and kit routing. */
 export async function createPremiumDrumBackend(
   context: BaseAudioContext,
   options: Sf2DrumBackendOptions = {},
