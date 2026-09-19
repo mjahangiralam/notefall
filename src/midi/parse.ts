@@ -58,6 +58,11 @@ export async function parseMidi(file: ArrayBuffer, name: string): Promise<Parsed
 
   return {
     name,
+    notation: {
+      bpm: midi.header.tempos[0]?.bpm || 120,
+      numerator: midi.header.timeSignatures[0]?.timeSignature[0] || 4,
+      denominator: midi.header.timeSignatures[0]?.timeSignature[1] || 4,
+    },
     duration: midi.duration,
     notes,
     pedals,

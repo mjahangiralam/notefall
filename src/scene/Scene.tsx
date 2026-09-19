@@ -43,6 +43,8 @@ import { audioEngine } from '../audio/engine'
 import { pauseSong, playSong, togglePlayback } from '../audio/playback'
 import { EditTools } from './EditTools'
 import { CameraControls, isCameraGestureActive } from './CameraControls'
+import { ScoreView, ScoreCamera } from './ScoreView'
+import { SpaceView, SpaceCamera } from './SpaceView'
 
 // On-screen preview tick rate when the user opts into the lighter
 // 30 fps mode. The rendered MP4 export drives its own fps regardless
@@ -53,6 +55,7 @@ const PREVIEW_FRAME_INTERVAL_MS = 1000 / 30
 export function Scene() {
   const s = useSettingsSlice(SCENE_ROOT_KEYS)
   const highFps = useStore((st) => st.settings.previewHighFps)
+  const visualizationMode = useStore((st) => st.settings.visualizationMode)
   // Recorder state kept here just for prop drilling into SceneContents
   // (edit-mode gating).
   const [recState, setRecState] = useState(recorder.getState())
@@ -65,6 +68,7 @@ export function Scene() {
   return (
     <Canvas
       dpr={[1, 2]}
+      shadows={visualizationMode === 'space3d'}
       gl={{ antialias: true, toneMapping: THREE.ACESFilmicToneMapping }}
       camera={{ position: s.cameraPos, fov: s.cameraFov, near: 0.1, far: 100 }}
       frameloop={highFps ? 'always' : 'demand'}
@@ -85,7 +89,7 @@ export function Scene() {
       <BackgroundSync />
       <SceneContents recState={recState} />
       {!highFps && <ThrottledTicker intervalMs={PREVIEW_FRAME_INTERVAL_MS} />}
-      {s.bloomEnabled && (
+      {s.bloomEnabled && visualizationMode !== 'sheet' && (
         <EffectComposer>
           <Bloom
             // @react-three/postprocessing types the ref as
@@ -134,7 +138,8 @@ function BackgroundSync() {
   const scene = useThree((s) => s.scene)
   const bg = useMemo(() => new THREE.Color(), [])
   useFrame(() => {
-    bg.set(getResolvedSettings().backgroundColor)
+    const mode = useStore.getState().settings.visualizationMode
+    bg.set(mode === 'sheet' ? '#131b2a' : mode === 'space3d' ? '#080b15' : getResolvedSettings().backgroundColor)
     if (scene.background instanceof THREE.Color) {
       scene.background.copy(bg)
     } else {
@@ -187,6 +192,7 @@ function ThrottledTicker({ intervalMs }: { intervalMs: number }) {
 function SceneContents({ recState }: { recState: 'idle' | 'recording' }) {
   const s = useSettingsSlice(SCENE_CONTENTS_KEYS)
   const transport = useStore((st) => st.transport)
+  const visualizationMode = useStore((st) => st.settings.visualizationMode)
   // Edit mode = not currently playing or recording. Mounting EditTools
   // (instead of PlayToggleArea) flips the meaning of every empty-area
   // click — "toggle play" becomes "select / range / add note". Live
@@ -197,17 +203,31 @@ function SceneContents({ recState }: { recState: 'idle' | 'recording' }) {
     <>
       <ambientLight intensity={0.35} />
       <directionalLight position={[2, 6, 4]} intensity={0.8} />
-      <CameraSync pos={s.cameraPos} lookAt={s.cameraLookAt} fov={s.cameraFov} />
-      <CameraControls />
       <R3FStateBridge />
-      {editMode ? <EditTools /> : <PlayToggleArea />}
-      <Keyboard />
-      <KeyboardFrontRail />
-      <KeyboardCheekBlocks />
-      {s.notesEnabled && <FallingNotes />}
-      {s.flashEnabled && <LandingFlashes />}
-      <HitParticles />
-      <HitLine />
+      {visualizationMode === 'sheet' ? (
+        <>
+          <ScoreCamera />
+          <ScoreView />
+        </>
+      ) : visualizationMode === 'space3d' ? (
+        <>
+          <SpaceCamera />
+          <SpaceView />
+        </>
+      ) : (
+        <>
+          <CameraSync pos={s.cameraPos} lookAt={s.cameraLookAt} fov={s.cameraFov} />
+          <CameraControls />
+          {editMode ? <EditTools /> : <PlayToggleArea />}
+          <Keyboard />
+          <KeyboardFrontRail />
+          <KeyboardCheekBlocks />
+          {s.notesEnabled && <FallingNotes />}
+          {s.flashEnabled && <LandingFlashes />}
+          <HitParticles />
+          <HitLine />
+        </>
+      )}
     </>
   )
 }

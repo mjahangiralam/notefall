@@ -24,6 +24,7 @@ import { buildDefaultTrackColors } from './notes/trackPalette'
 const HISTORY_LIMIT = 50
 
 export type FallDirection = 'down' | 'up'
+export type VisualizationMode = 'piano' | 'sheet' | 'space3d'
 
 /**
  * Surface treatment applied to falling-note instances. Add new entries here
@@ -36,6 +37,8 @@ export type FallDirection = 'down' | 'up'
 export type NoteTexture = 'solid' | 'liquid' | 'gem' | 'custom'
 
 export type Settings = {
+  // Render mode is a document setting; shared by preview and video export.
+  visualizationMode: VisualizationMode
   // Theme — a single color the user can apply across notes / hit line /
   // particles / keyboard glow at once via the Inspector's "Apply to All"
   // button. Stored separately so it persists between applies; individual
@@ -366,6 +369,7 @@ export type Settings = {
 }
 
 export const defaultSettings: Settings = {
+  visualizationMode: 'piano',
   themeColor: '#5ad7ff',
   keyboardY: -2.0,
   cameraFov: 32,

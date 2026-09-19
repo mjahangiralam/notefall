@@ -37,6 +37,8 @@ export type TrackInfo = {
 }
 
 export type ParsedSong = {
+  /** First meter/tempo for approximate score layout; later tempo/meter changes not engraved. */
+  notation?: { bpm: number; numerator: number; denominator: number }
   name: string
   duration: number
   notes: NoteEvent[]
