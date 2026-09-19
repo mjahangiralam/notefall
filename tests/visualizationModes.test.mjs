@@ -22,7 +22,9 @@ test('score canvas and 3d stage animate under the same R3F advance used by expor
   assert.match(sheet, /CanvasTexture/)
   assert.match(space, /useFrame\(/)
   assert.match(space, /audioEngine\.currentSongTime\(\)/)
-  assert.match(space, /track\.percussion/)
+  assert.match(space, /modelForTrack\(track\)/)
+  const catalog = await src('scene/instrumentAppearance.ts')
+  assert.match(catalog, /track\.percussion/)
 })
 
 test('realtime drum worklet uses compatible Tone node factory without modifying offline path', async () => {
