@@ -28,8 +28,8 @@ jobs:
       - name: Verify prepared SpessaSynth worklet
         run: test -s public/spessasynth_processor.min.js
 
-      - name: Verify GeneralUser fetch script
-        run: bash -n scripts/fetch-generaluser-gs.sh
+      - name: Verify Premium Drum SoundFont asset
+        run: test -s public/samples/premium-drum-collection-gm/Premium_Drum_Collection_GM.sf2
 
       - name: Test
         run: npm test
