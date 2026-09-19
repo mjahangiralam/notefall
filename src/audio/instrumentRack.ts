@@ -12,7 +12,7 @@ import {
 } from './sampler'
 import { createSampleStorage } from './sampleCache'
 import {
-  createGeneralUserDrumBackend,
+  createPremiumDrumBackend,
   type Sf2DrumBackend,
   type Sf2DrumKit,
 } from './sf2Bank'
@@ -252,13 +252,13 @@ export async function createInstrumentRack(
       return null
     }
     try {
-      sf2Drums = await createGeneralUserDrumBackend(ctx, {
+      sf2Drums = await createPremiumDrumBackend(ctx, {
         destination: soundfontExpression,
         scheduler: options.scheduler,
       })
       return sf2Drums
     } catch (error) {
-      console.warn('Could not load GeneralUser GS drums; falling back to TR-808.', error)
+      console.warn('Could not load Premium Drum Collection drums; falling back to TR-808.', error)
       sf2DrumsFailed = true
       await ensureDrums(onProgress)
       return null
@@ -294,7 +294,7 @@ export async function createInstrumentRack(
       } catch (error) {
         if (!sf2StartFailureLogged) {
           sf2StartFailureLogged = true
-          console.warn('GeneralUser GS drum playback failed; using TR-808 fallback.', error)
+          console.warn('Premium Drum Collection drum playback failed; using TR-808 fallback.', error)
         }
       }
     }

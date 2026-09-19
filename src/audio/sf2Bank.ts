@@ -3,12 +3,7 @@ import { WorkletSynthesizer } from 'spessasynth_lib'
 import { SoundBankLoader, SpessaSynthProcessor } from 'spessasynth_core'
 import { fetchSampleBytes } from './sampleCache'
 
-export const GENERALUSER_GS_VERSION = '2.0.3'
-
-const GENERALUSER_GS_PATH =
-  `generaluser-gs-${GENERALUSER_GS_VERSION}/GeneralUser-GS.sf2`
-
-export const GENERALUSER_GS_URL = `/samples/${GENERALUSER_GS_PATH}`
+export const PREMIUM_DRUM_SF2_URL = '/samples/premium-drum-collection-gm/Premium_Drum_Collection_GM.sf2'
 export const SPESSASYNTH_WORKLET_URL = '/spessasynth_processor.min.js'
 
 const POWER_DRUM_CHANNEL = 9
@@ -102,7 +97,7 @@ async function createRealtimeBackend(
   synth.connect(destination)
   await synth.soundBankManager.addSoundBank(
     bytes,
-    `generaluser-gs-${GENERALUSER_GS_VERSION}`,
+    'premium-drum-collection-gm',
   )
   await synth.isReady
   configureRealtimeKits(synth)
@@ -110,7 +105,7 @@ async function createRealtimeBackend(
   let disposed = false
 
   return {
-    instrumentName: 'GeneralUser GS Power / Orchestral Kits',
+    instrumentName: 'Premium Drum Collection Power / Orchestral Kits',
     start(midi, velocity, time, _stopId, kit = 'power') {
       if (disposed) return () => {}
       const channel = channelForKit(kit)
@@ -148,7 +143,7 @@ async function createOfflineBackend(
   let renderedSource: AudioBufferSourceNode | null = null
 
   return {
-    instrumentName: 'GeneralUser GS Power / Orchestral Kits (offline)',
+    instrumentName: 'Premium Drum Collection Power / Orchestral Kits (offline)',
     start(midi, velocity, time, _stopId, kit = 'power') {
       if (disposed || finalized) return () => {}
       events.push({
@@ -172,7 +167,7 @@ async function createOfflineBackend(
       const synth = new SpessaSynthProcessor(sampleRate)
       synth.soundBankManager.addSoundBank(
         SoundBankLoader.fromArrayBuffer(bytes),
-        `generaluser-gs-${GENERALUSER_GS_VERSION}`,
+        'premium-drum-collection-gm',
       )
       await synth.processorInitialized
       configureOfflineKits(synth)
@@ -233,7 +228,7 @@ async function createOfflineBackend(
 }
 
 /**
- * GeneralUser GS percussion backend.
+ * Premium Drum Collection percussion backend.
  *
  * Realtime playback uses SpessaSynth's AudioWorklet wrapper so the SoundFont
  * modulators, envelopes, exclusive classes and kit behavior are honored.
@@ -241,12 +236,12 @@ async function createOfflineBackend(
  * OfflineAudioContext.startRendering(), avoiding Chromium's documented
  * limitation around ordinary worklet messages in offline contexts.
  */
-export async function createGeneralUserDrumBackend(
+export async function createPremiumDrumBackend(
   context: BaseAudioContext,
   options: Sf2DrumBackendOptions = {},
 ): Promise<Sf2DrumBackend> {
   const fetchBytes = options.fetchBytes ?? fetchSampleBytes
-  const bytes = await fetchBytes(GENERALUSER_GS_URL)
+  const bytes = await fetchBytes(PREMIUM_DRUM_SF2_URL)
   const destination = options.destination ?? context.destination
 
   if (isOfflineContext(context)) {

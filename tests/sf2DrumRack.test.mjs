@@ -6,9 +6,9 @@ async function rackSource() {
   return readFile(new URL('../src/audio/instrumentRack.ts', import.meta.url), 'utf8')
 }
 
-test('rack prepares one shared GeneralUser backend for both SF2 drum routes', async () => {
+test('rack prepares one shared Premium Drum Collection backend for both SF2 drum routes', async () => {
   const source = await rackSource()
-  assert.match(source, /createGeneralUserDrumBackend/)
+  assert.match(source, /createPremiumDrumBackend/)
   assert.match(source, /id\s*===\s*['"]drum:gm-sf2['"]\s*\|\|\s*id\s*===\s*['"]drum:gm-sf2-orchestral['"]/)
   assert.match(source, /await\s+ensureSf2Drums\(/)
 })
@@ -25,7 +25,7 @@ test('Power-kit percussion preserves the original MIDI note', async () => {
   )
 })
 
-test('orchestral percussion routes to the GeneralUser orchestral kit', async () => {
+test('orchestral percussion routes to the Premium Drum Collection orchestral kit', async () => {
   const source = await rackSource()
   assert.match(
     source,
@@ -35,7 +35,7 @@ test('orchestral percussion routes to the GeneralUser orchestral kit', async () 
 
 test('SF2 failure falls back to TR-808 and never piano', async () => {
   const source = await rackSource()
-  assert.match(source, /Could not load GeneralUser GS drums; falling back to TR-808/)
+  assert.match(source, /Could not load Premium Drum Collection drums; falling back to TR-808/)
   assert.match(source, /ensureSf2Drums[\s\S]*?ensureDrums\(/)
 
   const ensureDrums = source.match(/async function ensureDrums[\s\S]*?\n  }\n\n  async function ensureSf2Drums/)?.[0] ?? ''

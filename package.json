@@ -14,8 +14,7 @@
     "prepare-salamander": "node scripts/prepare-salamander.mjs",
     "prepare-spessasynth": "node scripts/prepare-spessasynth.mjs",
     "postinstall": "npm run prepare-spessasynth",
-    "upload-r2": "bash scripts/upload-r2.sh",
-    "fetch-generaluser": "bash scripts/fetch-generaluser-gs.sh"
+    "upload-r2": "bash scripts/upload-r2.sh"
   },
   "dependencies": {
     "@react-three/drei": "^9.114.0",
